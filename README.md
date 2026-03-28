@@ -25,17 +25,19 @@ sudo apt install jq ripgrep
 brew install jq ripgrep
 ```
 
+**Ix Pro** is optional. All skills and hooks work with basic ix. If ix pro is installed, the session briefing hook (`ix-briefing.sh`) will additionally inject goals, bugs, and decisions at the start of each prompt.
+
 ## What It Does
 
 ### Automatic hooks
 
 | Trigger | Hook | Effect |
 |---------|------|--------|
-| User sends any prompt | `UserPromptSubmit` → `ix-briefing.sh` | Injects session briefing (goals, bugs, decisions) once per 10 min |
+| User sends any prompt | `UserPromptSubmit` → `ix-briefing.sh` | Injects session briefing (goals, bugs, decisions) once per 10 min — **requires ix pro** |
 | Claude runs `Grep` or `Glob` | `PreToolUse` → `ix-intercept.sh` | Front-runs with `ix text` + `ix locate`/`ix inventory` |
 | Claude runs `Read` | `PreToolUse` → `ix-read.sh` | Front-runs with `ix inventory` + `ix overview` for the file |
 | Claude runs `Bash` with grep/rg | `PreToolUse` → `ix-bash.sh` | Extracts pattern, front-runs with `ix text` + `ix locate` |
-| Claude edits a file | `PostToolUse` → `ix-ingest.sh` (async) | Ingests changed file into the Ix graph |
+| Claude edits a file | `PostToolUse` → `ix-ingest.sh` (async) | Runs `ix map <file>` to update the graph for the changed file |
 | Claude finishes responding | `Stop` → `ix-map.sh` (async) | Runs `ix map` to refresh the full architectural graph |
 
 All hooks bail silently if `ix` is not in PATH or the backend is unreachable.
@@ -48,7 +50,17 @@ All hooks bail silently if `ix` is not in PATH or the backend is unreachable.
 | `/ix-explain <symbol>` | Explain what a symbol does using `ix explain` |
 | `/ix-impact <target>` | Analyze blast radius of changing a symbol or file |
 | `/ix-trace <symbol>` | Trace the execution flow or call chain for a symbol |
-| `/ix-smells` | Detect code smells and structural issues |
+| `/ix-smells [path]` | Detect code smells and structural issues |
+| `/ix-understand [target]` | Full architectural overview of a subsystem, module, or the whole repo |
+| `/ix-investigate <symbol>` | Deep investigation chaining explain → trace → depends → callers → impact |
+| `/ix-depends <symbol>` | Show the full upstream dependency tree |
+| `/ix-diff <fromRev> <toRev>` | Show structural changes between two graph revisions |
+| `/ix-plan <symbol> [...]` | Risk-annotated change plan for multi-file implementations |
+| `/ix-before-edit <target>` | Pre-edit safety check — impact + callers + overview |
+| `/ix-read <symbol>` | Read just a symbol's source (resolves to exact file:lines) |
+| `/ix-subsystems [target]` | Explore the architectural map — systems, subsystems, cohesion metrics |
+
+All skills fall back gracefully when ix is unavailable — using Grep, Glob, and Read tools instead where possible.
 
 ### Agent
 

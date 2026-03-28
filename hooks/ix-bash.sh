@@ -2,8 +2,9 @@
 # ix-bash.sh — PreToolUse hook for Bash
 #
 # Fires before Claude runs a Bash command. Detects grep/rg search patterns and
-# front-runs them with ix text + ix locate for graph-aware, token-efficient
-# results before the raw shell command executes.
+# front-runs them with ix text + ix locate for graph-aware results.
+#
+# Output is a CONCISE one-line summary — not raw JSON dumps.
 #
 # Exit 0 + JSON stdout → injects additionalContext, Bash still runs
 # Exit 0 + no stdout  → no-op, Bash runs normally
@@ -17,12 +18,10 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 # Only intercept grep/rg invocations
 echo "$COMMAND" | grep -qE '^\s*(grep|rg)\s' || exit 0
 
-# Bail silently if ix is not in PATH
 command -v ix >/dev/null 2>&1 || exit 0
 
-# ── Health + pro check (30s TTL cache) ───────────────────────────────────────
+# ── Health check (30s TTL cache) ──────────────────────────────────────────────
 IX_HEALTH_CACHE="${TMPDIR:-/tmp}/ix-healthy"
-IX_PRO_CACHE="${TMPDIR:-/tmp}/ix-pro"
 _now=$(date +%s)
 _cache_ok=0
 if [ -f "$IX_HEALTH_CACHE" ]; then
@@ -32,12 +31,14 @@ fi
 if [ "$_cache_ok" -eq 0 ]; then
   ix status >/dev/null 2>&1 || exit 0
   echo "$_now" > "$IX_HEALTH_CACHE"
-  ix briefing --help >/dev/null 2>&1 && echo "1" > "$IX_PRO_CACHE" || echo "0" > "$IX_PRO_CACHE"
 fi
 
-IX_PRO=$(cat "$IX_PRO_CACHE" 2>/dev/null || echo "0")
+# ── Helper: strip ix header noise, extract JSON ───────────────────────────────
+parse_json() {
+  echo "$1" | awk '/^\[|^\{/{found=1} found{print}' | jq -c . 2>/dev/null || echo ""
+}
 
-# ── Extract search pattern ────────────────────────────────────────────────────
+# ── Extract search pattern from command ────────────────────────────────────────
 PATTERN=""
 PATTERN=$(echo "$COMMAND" | sed -E 's/.*\s"([^"]+)".*/\1/' 2>/dev/null) || PATTERN=""
 if [ -z "$PATTERN" ] || [ "$PATTERN" = "$COMMAND" ]; then
@@ -48,29 +49,63 @@ if [ -z "$PATTERN" ] || [ "$PATTERN" = "$COMMAND" ]; then
 fi
 
 [ -z "$PATTERN" ] && exit 0
-[ ${#PATTERN} -lt 2 ] && exit 0
+[ ${#PATTERN} -lt 3 ] && exit 0
 
-# ── Run ix text + ix locate in parallel ─────────────────────────────────────
+# ── Run ix text + ix locate in parallel ───────────────────────────────────────
 _text_tmp=$(mktemp)
-_locate_tmp=$(mktemp)
-trap 'rm -f "$_text_tmp" "$_locate_tmp"' EXIT
+_loc_tmp=$(mktemp)
+trap 'rm -f "$_text_tmp" "$_loc_tmp"' EXIT
 
-ix text "$PATTERN" --limit 20 --format json > "$_text_tmp" 2>/dev/null &
-_text_pid=$!
-ix locate "$PATTERN" --limit 10 --format json > "$_locate_tmp" 2>/dev/null &
-_locate_pid=$!
+ix text "$PATTERN" --limit 15 --format json > "$_text_tmp" 2>/dev/null &
 
-wait "$_text_pid" || true
-wait "$_locate_pid" || true
+_is_plain=1
+echo "$PATTERN" | grep -qE '[\\^$\[\](){}|*+?]' && _is_plain=0
+if [ "$_is_plain" -eq 1 ]; then
+  ix locate "$PATTERN" --limit 5 --format json > "$_loc_tmp" 2>/dev/null &
+fi
 
-TEXT_RESULT=$(cat "$_text_tmp")
-LOCATE_RESULT=$(cat "$_locate_tmp")
+wait
 
-[ -z "$TEXT_RESULT" ] && [ -z "$LOCATE_RESULT" ] && exit 0
+TEXT_RAW=$(cat "$_text_tmp")
+LOC_RAW=$(cat "$_loc_tmp" 2>/dev/null || echo "")
 
-CONTEXT="[ix] Pre-bash search results for pattern: '${PATTERN}'"
-[ -n "$TEXT_RESULT" ]   && CONTEXT="${CONTEXT}\n\n--- ix text ---\n${TEXT_RESULT}"
-[ -n "$LOCATE_RESULT" ] && CONTEXT="${CONTEXT}\n\n--- ix locate ---\n${LOCATE_RESULT}"
+[ -z "$TEXT_RAW" ] && [ -z "$LOC_RAW" ] && exit 0
+
+# ── Summarise text results ─────────────────────────────────────────────────────
+TEXT_JSON=$(parse_json "$TEXT_RAW")
+TEXT_PART=""
+if [ -n "$TEXT_JSON" ]; then
+  TEXT_COUNT=$(echo "$TEXT_JSON" | jq 'length' 2>/dev/null || echo 0)
+  if [ "${TEXT_COUNT:-0}" -gt 0 ]; then
+    FILES=$(echo "$TEXT_JSON" | jq -r '[.[].path] | unique | .[:4] | map(split("/")[-1]) | join(", ")' 2>/dev/null || echo "")
+    MORE=$(( TEXT_COUNT > 4 ? TEXT_COUNT - 4 : 0 ))
+    TEXT_PART="${TEXT_COUNT} text hits"
+    [ -n "$FILES" ] && TEXT_PART="${TEXT_PART} in ${FILES}"
+    [ "$MORE" -gt 0 ] && TEXT_PART="${TEXT_PART} (+${MORE} more)"
+  fi
+fi
+
+# ── Summarise symbol results ───────────────────────────────────────────────────
+LOC_JSON=$(parse_json "$LOC_RAW")
+LOC_PART=""
+if [ -n "$LOC_JSON" ]; then
+  IS_RESOLVED=$(echo "$LOC_JSON" | jq -r '.resolvedTarget.name // empty' 2>/dev/null || echo "")
+  if [ -n "$IS_RESOLVED" ]; then
+    KIND=$(echo "$LOC_JSON" | jq -r '.resolvedTarget.kind // ""' 2>/dev/null || echo "")
+    FILE=$(echo "$LOC_JSON" | jq -r '(.resolvedTarget.path // "") | split("/")[-1]' 2>/dev/null || echo "")
+    LOC_PART="symbol: ${IS_RESOLVED} (${KIND}${FILE:+, $FILE})"
+  else
+    CANDS=$(echo "$LOC_JSON" | jq -r '.candidates[:3] | map(.name + " (" + .kind + ")") | join(", ")' 2>/dev/null || echo "")
+    [ -n "$CANDS" ] && LOC_PART="candidates: ${CANDS}"
+  fi
+fi
+
+[ -z "$TEXT_PART" ] && [ -z "$LOC_PART" ] && exit 0
+
+CONTEXT="[ix] bash grep intercepted for '${PATTERN}'"
+[ -n "$LOC_PART" ]  && CONTEXT="${CONTEXT} — ${LOC_PART}"
+[ -n "$TEXT_PART" ] && CONTEXT="${CONTEXT} | ${TEXT_PART}"
+CONTEXT="${CONTEXT} | Prefer: ix text '${PATTERN}' or ix locate '${PATTERN}' over shell grep"
 
 jq -n --arg ctx "$CONTEXT" '{"additionalContext": $ctx}'
 exit 0

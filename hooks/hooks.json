@@ -41,6 +41,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ix-pre-edit.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [

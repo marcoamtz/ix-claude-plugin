@@ -4,8 +4,16 @@ description: Explain a symbol, function, class, or module using Ix Memory graph-
 argument-hint: <symbol>
 ---
 
-For system-level questions ("how does [module/service/subsystem] work", "explain the architecture of X") use `/ix-understand` instead — this skill is for single symbols only.
+If `command -v ix` is unavailable, use Grep to locate the symbol then Read the source directly.
 
-Run `ix explain $ARGUMENTS --format json` using the Bash tool.
+For system-level questions ("how does [module/service/subsystem] work") use `/ix-understand` instead — this skill is for single symbols only.
 
-Present a clear explanation covering: what the symbol does, its purpose in the system, inputs and outputs, and any notable behaviors or side effects. If ix returns no result, fall back to `ix locate $ARGUMENTS --format json` to find it, then read the source directly.
+If `$ARGUMENTS` is a file path, run `ix inventory --path $ARGUMENTS --format json` to list its entities, then explain the most important ones.
+
+Otherwise run `ix explain $ARGUMENTS --format json`.
+
+If ix returns nothing, fall back to `ix locate $ARGUMENTS --format json` to find the symbol, then read the source directly.
+
+Present: what the symbol does, its purpose in the system, inputs/outputs, and notable behaviors or side effects.
+
+Suggest `/ix-trace $ARGUMENTS` if the caller would benefit from seeing execution flow, or `/ix-impact $ARGUMENTS` before making changes.

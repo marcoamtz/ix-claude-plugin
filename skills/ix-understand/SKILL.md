@@ -4,114 +4,117 @@ description: Explain an entire codebase, subsystem, or module using ix graph-awa
 argument-hint: [target]
 ---
 
-# When to use
-
-Trigger on:
-- `/ix-understand`, `/ix-understand <name>`, `/ix-understand <path>`
-- "how does [system/module/service] work"
-- "explain the architecture of [thing]"
-- "what is this codebase / repo about"
-- "walk me through [subsystem]"
-- "give me an overview of [module]"
-
-Do NOT use for single-symbol questions (a function, class, variable) — use `/ix-explain` instead.
-
----
-
 # Reasoning protocol
 
-Follow these steps in order. Do not skip ahead to reading files.
+Check `command -v ix` first. If unavailable, stop and say so. Do not start with file reads or Glob sweeps.
 
 ## Step 1 — Scope resolution
 
 Parse `$ARGUMENTS`:
 
-| Input | Scope |
+| Input | Action |
 |---|---|
-| empty | whole repo — top-level architecture |
-| name matching a subsystem or module | subsystem scope |
+| empty | whole-repo scope |
+| `"X in Y"` / `"X of Y"` / `"X within Y"` | target=X, treat Y as context hint |
 | file path or directory | path scope |
-| ambiguous | pick best match, state assumption explicitly |
+| anything else | subsystem/module name |
 
-If the target is ambiguous, run `ix text "$ARGUMENTS" --limit 10 --format json` to locate it, pick the strongest match, and say: "Interpreting target as X — [reason]."
-
-## Step 2 — Architecture-first discovery
-
-Run these **before reading any files**:
-
+For any non-empty target, run as a fast first probe:
 ```bash
-ix rank --format json
+ix locate "$TARGET" --limit 5 --format json
+```
+If locate returns a clear hit, use that as the resolved target. If ambiguous or empty, note: "Interpreting target as X — [reason]."
+
+## Step 2 — Discovery
+
+**Targeted scope** — run in parallel:
+```bash
+ix overview "$TARGET" --format json
+```
+If overview returns nothing, fall back to:
+```bash
+ix text "$TARGET" --limit 15 --format json
+```
+Run `ix inventory --path "$TARGET"` only if target is a file path or directory.
+
+**Whole-repo scope only** — run in parallel:
+```bash
+ix subsystems --format json
+ix rank --by dependents --kind class --top 10 --exclude-path test --format json
+ix rank --by callers --kind function --top 10 --exclude-path test --format json
 ```
 
-If `$ARGUMENTS` is non-empty, also run in parallel:
-
-```bash
-ix overview "$ARGUMENTS" --format json
-ix inventory --path "$ARGUMENTS" --format json
-```
-
-If `ix overview` returns nothing, fall back to:
-
-```bash
-ix text "$ARGUMENTS" --limit 20 --format json
-```
-
-For whole-repo scope, also run:
-
-```bash
-ix map --format json
-```
+> Use `ix subsystems` (reads persisted map, fast) rather than `ix map` (re-runs full clustering, slow). Only run `ix map` if `ix subsystems` returns no regions.
 
 ## Step 3 — Component deep-dive
 
-From `ix rank` and `ix overview` results, identify the 3–8 most central components. For each, run:
-
+From overview/rank results, pick the **2–4 most central or unclear** components. Run in parallel:
 ```bash
 ix explain <component> --format json
 ```
+Skip components the overview already fully described.
 
-Run these in parallel. Skip any that ix rank already fully described.
+## Step 4 — Flow tracing (conditional)
 
-## Step 4 — Flow tracing
-
-Identify the primary entry point or orchestrating component. Trace it:
-
+Only run if the query implies a pipeline, data flow, request path, or execution sequence:
 ```bash
 ix trace <entry-point> --format json
 ```
+One trace is enough — pick the most representative path.
 
-If there is an obvious data flow (ingestion pipeline, request handler, event loop), trace that specifically. One trace is enough — pick the most representative path.
+## Step 5 — Dependencies
 
-## Step 5 — Dependency extraction
+From the ix output gathered, extract:
+- External deps (third-party, external services)
+- Internal cross-module deps
+- What this scope exposes vs consumes
 
-From the ix output gathered so far, extract:
-- External dependencies (third-party libraries, external services)
-- Internal cross-module dependencies
-- What this scope exposes vs what it consumes
+Only read source files if a dependency is unclear after this step.
 
-Only read source files if a critical dependency is unclear after this step.
+## Step 6 — Uncertainty
 
-## Step 6 — Uncertainty classification
-
-Label every significant claim:
-- **Supported** — direct graph evidence (ix returned it explicitly)
-- **Inferred** — reasonable conclusion from structure, not explicitly stated
-- **Uncertain** — weak or conflicting evidence; flag it
-
-Use hedged language for inferred claims: "the graph suggests…", "likely…", "unclear from available data". Do not assert what the graph does not support.
+Label every significant claim: **Supported** (direct graph evidence), **Inferred** (reasonable from structure), **Uncertain** (weak/conflicting). Use hedged language for inferred claims.
 
 ---
 
 # Output
 
-Use the template in `references/output-format.md`. Produce all sections. Keep structure sections as bullet lists. Reserve prose for the Overview paragraph and flow descriptions.
+Produce exactly these sections in order. Write "None identified" if a section has no content.
 
----
+```
+# [Target] — Architecture Overview
 
-# Constraints
+> **Scope:** [repo | subsystem: <name> | path: <path>]
+> **Evidence quality:** [strong | partial | weak] — [one sentence why]
+> **Assumption:** [only if scope was ambiguous]
 
-- Check `command -v ix` first. If ix is unavailable, stop and say so.
-- Do not start with file reads or Glob sweeps.
-- Only read source files to confirm a specific detail after ix has established the structure.
-- If ix data is thin (new or unindexed repo), say so and note which claims are based on raw file fallbacks.
-- Prefer parallel ix queries to reduce latency on large repos.
+## Overview
+[One paragraph: what it does, primary job, why it exists, who uses it.]
+
+## Structure
+- **ComponentA** — [role in one line]
+- **ComponentB** — [role in one line]
+[2–5 components. Group by layer if applicable: interface / orchestration / persistence / utilities.]
+
+## Key Flows
+1. [Entry point] → [step] → [step] → [outcome]
+2. [Second flow only if meaningfully different]
+
+## Dependencies
+**Consumes:**
+- `dep-name` — [what it's used for]
+
+**Exposes:**
+- `interface` — [who consumes it]
+
+## Risks & Ambiguity
+- [claim or gap] — *inferred* / *uncertain* — [why]
+
+## Next Drill-Downs
+- `/ix-trace <entry-point>` — trace main execution path
+- `/ix-explain <ComponentA>` — deeper look at its role
+- `/ix-impact <ComponentB>` — blast radius before modifying
+- `/ix-understand <sub-scope>` — narrow into specific area
+```
+
+Formatting: `##` headers, `**bold**` component names, code ticks for symbols/paths/commands, bullet lists for Structure and Dependencies, numbered lists for Key Flows, no trailing summary paragraph.
