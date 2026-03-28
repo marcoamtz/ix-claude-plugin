@@ -1,0 +1,14 @@
+{
+  "name": "ix-claude-plugin",
+  "owner": {
+    "name": "ix-infrastructure"
+  },
+  "plugins": [
+    {
+      "name": "ix-memory",
+      "source": "./",
+      "description": "Ix Memory integration — graph-aware hooks for search, reads, and auto-ingestion",
+      "version": "1.0.0"
+    }
+  ]
+}
