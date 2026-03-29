@@ -78,18 +78,18 @@ When answering a question about the codebase:
 | `/ix-plan <targets...>` | Risk-ordered change plan | Multi-file changes, refactors |
 | `/ix-debug <symptom>` | Root cause analysis | Bug investigation, unexpected behavior |
 | `/ix-architecture [scope]` | Design health analysis | Code review, architecture discussions |
-| `/ix-docs <target> [--out <path>] [--full] [--split] [--single-doc] [--concise] [--depth N] [--focus area]` | Write full documentation to a file | Onboarding docs, handoffs, deep reference |
+| `/ix-docs <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]` | Write narrative-first docs with a selective reference layer | Onboarding docs, handoffs, deep reference |
 
-`ix-docs` writes a 9-section Markdown file (or directory of files) to disk. Output path auto-detects `docs/`, `doc/`, or workspace root if `--out` is omitted.
+`ix-docs` writes a narrative-first Markdown document (or split doc set) to disk. Each run starts with an onboarding-friendly narrative layer and ends with a selective reference section for the most important modules, classes, and, in `--full`, key methods. Output path auto-detects `docs/`, `doc/`, or workspace root if `--out` is omitted.
 
 **Modes:**
-- *(default)* — adaptive tier budget based on target size (XL/L/M/S)
-- `--full` — expanded coverage: all systems documented, deeper traversal, rank-ordered expansion; auto-splits into per-subsystem files when > 10 subsystems
-- `--full --split` — explicitly produce `index.md` + per-system files
+- *(default)* — narrative-focused onboarding doc with a compact selective reference appendix
+- `--full` — deeper coverage for important systems, modules, classes, and selected methods; still importance-weighted, never exhaustive
+- `--style narrative` — prose-first narrative sections with a compact reference layer
+- `--style reference` — docs-site style structure with a briefer narrative layer
+- `--style hybrid` — full narrative plus fuller selective reference; recommended with `--full`
+- `--full --split` — produce `index.md` plus per-system or per-subsystem docs for large repos
 - `--full --single-doc` — force one large file regardless of repo size
-- `--concise` — skip behavior, health, and code reads
-- `--depth 1|2|3` — traversal depth (default 1, full mode default 2)
-- `--focus architecture|behavior|risk|dependencies` — emphasize one dimension
 
 ---
 

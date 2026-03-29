@@ -1,404 +1,495 @@
 ---
 name: ix-docs
-description: Generate deep, structured documentation for a system, subsystem, module, or component. Synthesizes architecture, behavior, relationships, risk, and health into a single cohesive document. Use --full for complete repository coverage.
-argument-hint: <target> [--out <path>] [--full] [--split] [--single-doc] [--concise] [--depth 1|2|3] [--focus architecture|behavior|risk|dependencies]
+description: Generate narrative-first, importance-weighted documentation for a repo, system, or subsystem with a selective reference layer. Use --full for deeper module/class/method coverage.
+argument-hint: <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]
 ---
 
 Check `command -v ix` first. If unavailable, stop and say so.
 
+## Goal
+
+Produce documentation that helps a new engineer understand the system quickly and gives an LLM strong architectural context without drowning it in low-value detail.
+
+Write like real engineering documentation for a framework or subsystem:
+- teach the system
+- explain how it works
+- show where the important parts live
+- surface risks and fragile boundaries
+- point the reader to the next files or symbols to inspect
+
+Never write a raw report dump.
+
 ---
 
-## Argument parsing
+## Core model
+
+Every `ix-docs` run produces **two layers**:
+
+1. **Narrative layer** (always first)
+   - human-readable explanation
+   - onboarding-focused
+   - architecture, flow, usage, risks, navigation guidance
+
+2. **Reference layer** (always present, but selective)
+   - compressed summaries of important modules, classes, and services
+   - short, structured, high-signal entries
+   - no code dumping
+
+**Mode behavior**
+- `ix-docs <target>`: narrative-heavy by default, with a minimal selective reference appendix
+- `ix-docs <target> --full`: deeper coverage for important components, still importance-weighted
+
+**Style behavior**
+- `--style narrative` (default): prose-first narrative sections; reference layer stays compact
+- `--style reference`: tighter, docs-site style structure; narrative stays brief but is not removed
+- `--style hybrid`: full narrative plus fuller selective reference; best match for `--full`
+
+---
+
+## Flags
 
 | Fragment | Variable | Default |
 |---|---|---|
-| first non-flag token | `TARGET` | (required — use `.` or repo name for whole repo) |
-| `--out <path>` | `OUT_PATH` | auto-detect (see below) |
+| first non-flag token | `TARGET` | required |
 | `--full` | `FULL=true` | false |
-| `--split` | `SPLIT=true` | false (auto-set if FULL + repo is large) |
+| `--style narrative|reference|hybrid` | `STYLE` | `narrative` |
+| `--split` | `SPLIT=true` | false |
 | `--single-doc` | `SINGLE=true` | false |
-| `--concise` | `CONCISE=true` | false |
-| `--depth <n>` | `DEPTH` | 1 (2 in full mode) |
-| `--focus <area>` | `FOCUS` | all |
+| `--out <path>` | `OUT_PATH` | auto-detect |
 
-**`--focus` values:** `architecture` / `behavior` / `risk` / `dependencies`
+**Output rules**
+- `--single-doc` forces one Markdown file
+- `--split` produces a directory with `index.md` plus per-system or per-subsystem docs
+- if neither is set and `FULL=true` on a repo with more than 10 subsystems, auto-enable `SPLIT=true`
+- `--single-doc` overrides auto-splitting
 
-**`--split` vs `--single-doc`:** If neither is set and full mode is triggered on a large target (> 10 subsystems), auto-set `SPLIT=true` and inform the user. `--single-doc` overrides this and forces one file regardless of size.
+**Output path auto-detection**
+1. `docs/` exists at workspace root → `docs/<target-name>.md` or `docs/<target-name>/`
+2. `doc/` exists → `doc/<target-name>.md` or `doc/<target-name>/`
+3. otherwise → `<target-name>.md` or `<target-name>/` at workspace root
 
-**Output path auto-detection:**
-1. `docs/` exists at workspace root → `docs/<target-name>.md` (or `docs/<target-name>/` in split mode)
-2. `doc/` exists → `doc/<target-name>.md` (or `doc/<target-name>/`)
-3. Otherwise → `<target-name>.md` at workspace root (or `<target-name>/` in split mode)
+If `FULL=true`, tell the user the planned mode, output path, and whether splitting was auto-enabled before generating the docs.
 
 ---
 
-## Pre-run: scope assessment
+## Non-negotiable rules
 
-Always run before any other phase:
+1. **Graph first**
+   - Start with `ix subsystems`, `ix overview`, `ix rank`, `ix explain`
+   - Use `ix read` only after graph data leaves an important behavior unclear
 
+2. **Importance-weighted expansion**
+   - Expand detail by centrality, risk, coupling, orchestration role, and user focus
+   - Never treat all modules equally
+
+3. **Selective low-level detail**
+   - Default mode: module and class summaries only for important parts
+   - Full mode: method summaries only for key classes or services
+
+4. **No raw dumps**
+   - Never output raw JSON
+   - Never paste command logs
+   - Never dump full file inventories, all callers, or all methods
+
+5. **No redundancy**
+   - Group repeated patterns
+   - If several modules have the same role, summarize the pattern once
+   - If an entity appears in multiple rankings, explain it once and cross-reference
+
+6. **Code reads are rare**
+   - Default mode: at most 2 `ix read` calls total
+   - Full mode: at most 5 `ix read` calls total
+   - Symbol-level only; never read whole files for this skill
+
+---
+
+## Coverage policy
+
+Use the following ranking factors to decide what gets expanded:
+
+1. **Centrality**: `ix rank`, caller count, dependent count
+2. **Risk**: `ix impact`
+3. **Coupling**: cross-system or cross-subsystem relationships
+4. **Orchestration role**: coordinators, entry points, workflow managers from `ix explain`
+5. **User focus**: the exact target and its immediate neighborhood
+
+### Always include
+- top-level architecture
+- all major subsystems in scope
+- the most important modules or services
+
+### Sometimes include
+- important files
+- key classes or services
+- notable boundary functions or entry points
+
+### Only in `--full`
+- selective method summaries for the most important classes or services
+- expanded per-subsystem module coverage
+
+### Never
+- exhaustive inventories
+- equal treatment for every module
+- long method lists
+
+### Expansion budgets
+
+**Default mode**
+- repo or large system: cover all major subsystems, expand the top 3-5 most important ones, reference 5-8 key components total
+- subsystem or module: expand the target fully, reference the top 5-8 entities in scope
+- symbol or small component: focus on the target, its immediate collaborators, and the surrounding subsystem
+
+**Full mode**
+- repo or large system: cover all major systems, expand the top 5-8 by importance, create short stubs for lower-ranked ones when split output is large
+- subsystem or module: expand the top 8-12 entities, add method summaries for the top 3-5 classes or services only
+
+When a repo is very large, prefer:
+- full docs for the highest-ranked systems
+- short overview stubs for the lower-ranked remainder
+
+---
+
+## Command strategy
+
+Do not run every command mechanically. Reuse earlier results and stop when additional depth would not materially improve the documentation.
+
+### Phase 1 — Scope
+
+Always start with:
 ```bash
 ix stats --format json
 ix subsystems --format json
+ix subsystems --list --format json
 ```
 
-Extract: total entity count, subsystem count, system count.
-
-**In full mode — emit warning and plan before proceeding:**
-
-```
-⚠ Full coverage run requested.
-  Repo: [N] entities across [M] subsystems in [K] systems
-  Mode: [single document | split — root + M subsystem files]
-  Output: [OUT_PATH]
-  Depth: [DEPTH]
-  Note: Traversal is deeper and broader. This will take longer and produce more output.
-```
-
-Then state the execution plan: which systems will be documented, what depth, whether splitting.
-
-**Auto-split threshold:** If `FULL=true` and subsystem count > 10 and `SINGLE=false`, set `SPLIT=true` automatically.
-
-**Extremely large repos (> 50 subsystems):** In split mode, document top-level systems fully and create stubs for subsystems below rank threshold. State this in the warning: *"Repo has N subsystems. Full-depth docs will be created for the top [K] by importance. Remaining subsystems get overview stubs."*
-
----
-
-## Phase 1 — Scope resolution
-
-Determine what `TARGET` refers to and select budget tier.
-
-**Normal mode — tier selection:**
-
-Run in parallel:
+If `TARGET` is not obviously the whole repo:
 ```bash
 ix locate "$TARGET" --limit 5 --format json
 ```
-(subsystems already retrieved in pre-run)
 
-Classify and select tier:
+Resolve whether the target is:
+- repo
+- top-level system
+- subsystem
+- module or file
+- class, service, or symbol
 
-| Tier | Condition |
-|------|-----------|
-| **XL** | repo target, OR > 20 child regions, OR > 2000 total entities |
-| **L** | subsystem with 5–20 child regions, OR 200–2000 entities |
-| **M** | class/file/small module, 20–200 entities |
-| **S** | single function/symbol, < 20 entities |
+If ambiguous, resolve it before proceeding.
 
-**Full mode — tier is always XL regardless of target, but XL constraints are lifted.** See full mode phase overrides below.
+### Phase 2 — Architecture
 
-If ambiguous, resolve with `--pick`, `--path`, or `--kind` before proceeding.
+Use the graph to identify systems, subsystem boundaries, and the most important modules.
 
----
-
-## Phase 2 — Structure
-
-**Normal mode — by tier:**
-
-*Tier XL:*
+Common commands:
 ```bash
-ix subsystems --format json          # already ran — reuse
-ix subsystems --list --format json
-ix rank --by dependents --kind class    --top 5  --exclude-path test --format json
-ix rank --by callers   --kind function  --top 5  --exclude-path test --format json
+ix overview "$TARGET" --format json
+ix rank --by dependents --kind class --top 10 --exclude-path test --format json
+ix rank --by callers   --kind function --top 10 --exclude-path test --format json
 ```
-Document system-level shape only. Do not drill into individual subsystems.
 
-*Tier L:*
+If `TARGET` is the whole repo, skip `ix overview "$TARGET"` and rely on the pre-run subsystem data plus the rank results.
+
+Additional commands by scope:
+
+For repo or system targets:
 ```bash
 ix subsystems "$TARGET" --format json
 ix subsystems "$TARGET" --explain
-ix rank --by dependents --kind class    --top 10 --exclude-path test --format json
-ix rank --by callers   --kind function  --top 10 --exclude-path test --format json
 ```
 
-*Tier M:*
+For module or file targets:
 ```bash
-ix overview  "$TARGET" --format json
-ix contains  "$TARGET" --format json
-ix imports   "$TARGET" --format json
+ix contains "$TARGET" --format json
+ix imports  "$TARGET" --format json
 ```
 
-*Tier S:*
+Full mode:
+- raise rank budgets to 20
+- inspect the most important systems first, never alphabetically
+- for the top systems, collect `ix subsystems <system>` and `ix subsystems <system> --explain`
+
+### Phase 3 — Behavior
+
+This phase answers **how the system works**.
+
+Use:
 ```bash
-ix explain   "$TARGET" --format json
-ix overview  "$TARGET" --format json
+ix explain "$TARGET" --format json
 ```
 
-**Full mode — expanded structure:**
+Also run `ix explain` for the most important orchestrators, services, or entry points identified in Phase 2.
 
+Behavior budget:
+- default mode: explain the top 3-5 important entities
+- full mode: for each important subsystem, explain the top 5 classes or services and the top 3 functions or entry points
+
+Optional:
+- run **one** `ix trace` only if the main execution flow is still unclear after `ix explain`
+
+Describe:
+- request or data lifecycle
+- orchestration paths
+- subsystem handoffs
+- where decisions, transformation, or state changes happen
+
+Do not narrate every edge in a trace.
+
+### Phase 4 — Relationships
+
+Map the important dependencies and coupling points.
+
+Use:
 ```bash
-ix subsystems --format json           # reuse from pre-run
-ix subsystems --list --format json    # reuse from pre-run
-ix rank --by dependents --kind class    --top 20 --exclude-path test --format json
-ix rank --by callers   --kind function  --top 20 --exclude-path test --format json
+ix callers "$TARGET" --limit 20 --format json
+ix callees "$TARGET" --limit 15 --format json
+ix depends "$TARGET" --depth 2 --format json
 ```
 
-Then for **each top-level system** (not each subsystem — keep this one level deep in Phase 2):
-```bash
-ix subsystems "<system>" --format json
-ix subsystems "<system>" --explain
-```
-Run in parallel. Cap at the top 5 systems by entity count or rank.
+If `TARGET` is the whole repo, do not run repo-level callers or callees. Instead, run these commands for the top-ranked boundary components, orchestrators, or subsystem entry points and summarize the cross-subsystem edges they reveal.
 
-**Ordering rule (full mode):** Always process systems and subsystems in rank order (most important first), never alphabetically.
+For repo or large system targets, focus on:
+- cross-system relationships
+- shared infrastructure
+- boundary modules
+- the most central components from the rank results
 
----
+When counts are large:
+- group callers by subsystem
+- summarize repeated patterns
+- never list more than 15 similar names individually
 
-## Phase 3 — Behavior
+### Phase 5 — Risk
 
-Skip if `--concise`, `--focus architecture`, or `--focus risk`.
-
-**Normal mode:**
-- *XL:* Skip — no individual explains
-- *L:* `ix explain` top **3** entities by rank
-- *M:* `ix explain` top **5** entities; skip if role obvious from Phase 2
-- *S:* Already ran in Phase 2
-
-**Full mode:**
-
-For each system identified in Phase 2, run in parallel:
-```bash
-ix rank --by dependents --kind class    --top 10 --path "<system-path>" --exclude-path test --format json
-ix rank --by callers   --kind function  --top 5  --path "<system-path>" --exclude-path test --format json
-```
-
-Then `ix explain` for:
-- Top 5 classes per system (by dependents rank)
-- Top 3 functions per system (by callers rank)
-- Any entity with > 20 direct dependents regardless of system
-
-**Deduplication:** If the same entity appears in multiple system rank lists, explain it once and cross-reference.
-
-**Skip threshold:** Do not explain entities ranked below #10 in any metric unless they appear in a smell result or have > 15 cross-subsystem callers.
-
-If `DEPTH >= 2`: run one trace per top-level system entry point:
-```bash
-ix trace "<top-entry-point>" --downstream --format json
-```
-
----
-
-## Phase 4 — Relationships
-
-Skip if `--focus architecture`.
-
-**Normal mode:**
-- *XL:* `ix imported-by "$TARGET"` only — callers not meaningful at repo scope
-- *L:* `ix callers --limit 20`, group if > 15
-- *M:* `ix callers --limit 20` individually, `ix callees --limit 15`
-- *S:* all callers (no cap), all callees, `ix depends --depth 2`
-
-**Full mode:**
-
-For the target scope:
-```bash
-ix callers     "$TARGET" --limit 50 --format json
-ix imported-by "$TARGET" --format json
-ix depends     "$TARGET" --depth 2  --format json
-```
-
-For each documented system/subsystem:
-```bash
-ix callers "<subsystem-entry-point>" --limit 20 --format json
-```
-Run in parallel. Group callers by subsystem — never list > 15 individual names; summarize the rest.
-
-**Cross-subsystem edges (full mode priority):** Extract all calls that cross a system boundary. These are the highest-signal relationships — list them explicitly regardless of count.
-
-If `--focus dependencies` or `DEPTH >= 3`:
-```bash
-ix depends "$TARGET" --depth 3 --format json
-ix trace   "$TARGET" --format json
-```
-
----
-
-## Phase 5 — Risk
-
-Always run.
-
+Always run:
 ```bash
 ix impact "$TARGET" --format json
 ```
 
-**Normal mode:** If risk is `high`/`critical`, add `ix depends --depth 2` and `ix callers --limit 30`.
+Full mode:
+- also run `ix impact` for the top 2-5 high-centrality entities
 
-**Full mode — expanded coverage:**
+Use this phase to populate:
+- fragile integration points
+- change-sensitive modules
+- shared infrastructure warnings
+- parts of the system that need careful testing
 
-```bash
-ix impact "$TARGET" --format json
-```
+### Phase 6 — Health
 
-Additionally, for each system/subsystem with high rank centrality (top 3 by dependents):
-```bash
-ix impact "<high-centrality-entity>" --format json
-```
-Run in parallel. Cap at 5 impact calls total — pick the highest-rank entities.
-
-If any result is `critical`: immediately flag in the document and add:
-```bash
-ix depends "<critical-entity>" --depth 2 --format json
-ix callers "<critical-entity>" --limit 30 --format json
-```
-
-**Group callers by subsystem** when count > 15. Never list individually beyond that.
-
----
-
-## Phase 6 — Health
-
-Skip if `--concise`.
-
-**Normal mode:**
-- *XL:* `ix smells --format json` — high-severity only, flag top 3 worst regions
-- *L/M:* `ix smells --path "$TARGET" --format json`
-- *S:* Skip
-
-**Full mode:**
+Use:
 ```bash
 ix smells --format json
 ```
-Reuse `ix subsystems --list` data from pre-run. Flag:
-- All `god-module` smells (no threshold)
-- All `orphan` files with 0 connections
-- All regions with `crosscut_score > 0.15` (stricter than normal mode's 0.1)
-- Top 5 regions by `external_coupling` score
 
-**Group smells by system** — don't present as a flat list.
+If the target is smaller than a full repo, scope it when supported:
+```bash
+ix smells --path "$TARGET" --format json
+```
 
----
+Prioritize:
+- god modules
+- highly coupled regions
+- orphaned or poorly connected components
+- subsystems with weak boundaries
 
-## Phase 7 — Code reads
+Group health issues by subsystem, not as a flat dump.
 
-**Normal mode:**
-- *XL/L:* Never
-- *M:* 2 symbol reads max
-- *S:* 1 read if needed
+### Phase 7 — Optional reads
 
-**Full mode:**
+Only read code when graph data is insufficient for an important behavior.
 
-Read code only for:
-1. **Orchestrators** with > 15 dependents whose behavior is still unclear after `ix explain`
-2. **Critical path entry points** identified in Phase 4 traces
-3. **High-risk entities** flagged as `critical` in Phase 5
+Allowed use cases:
+- orchestrators with unclear control flow
+- critical entry points on the main execution path
+- high-risk components whose role is still ambiguous after `ix explain`
 
+Use:
 ```bash
 ix read <symbol> --format json
 ```
 
-Cap: **5 symbol reads** total across the entire full mode run. Symbol-level only. Never full files.
-
-**Skip criteria:** If `ix explain` returned high-confidence data (confidence > 0.8), do not read the source — the graph is sufficient.
+Do not summarize implementation line-by-line. Extract only the behavior needed to clarify the docs.
 
 ---
 
-## Output
+## Writing rules by style
 
-### Single document (`--single-doc` or small target)
+### `--style narrative`
+- lead with prose
+- each narrative section should explain how to think about the system
+- reference layer should stay compressed
 
-Write one file to `OUT_PATH`. Scale all sections to the tier/full-mode scope.
+### `--style reference`
+- still keep the narrative layer first, but tighten it to short paragraphs
+- use more headings, bullets, and compact summaries
+- make the reference layer more prominent than in narrative mode
 
-### Split mode (`--split` or auto-triggered)
-
-Write a directory of files:
-
-```
-<OUT_DIR>/
-  index.md              ← root architecture doc (Sections 1, 2, 7, 8, 9)
-  <system-1>.md         ← full doc for system 1 (all 9 sections)
-  <system-2>.md         ← full doc for system 2
-  ...
-  <system-N-stub>.md    ← overview stub for lower-ranked systems
-```
-
-Each subsystem file follows the same 9-section structure. Cross-link between files:
-- Root `index.md` links to each system file
-- Each system file links back to `index.md` and to adjacent systems
-
-**Stub format** (for subsystems below rank threshold):
-```markdown
-# [Subsystem] — Overview Stub
-
-> Full documentation not generated (below rank threshold).
-> Run `/ix-docs <subsystem>` for complete documentation.
-
-## Overview
-[One paragraph from ix subsystems --explain]
-
-## Key components
-[Top 3 by rank]
-
-## Risk
-[ix impact result]
-```
+### `--style hybrid`
+- full narrative layer
+- fuller reference layer
+- best option for `--full`, onboarding docs, and handoff docs
 
 ---
 
-## Document structure (all modes)
+## Output structure
+
+The document should feel like real documentation, not an investigation transcript.
+
+Use this structure.
 
 ```markdown
 # [Target] — Documentation
 
-> **Generated:** [date]
-> **Scope:** [repo | subsystem | path | symbol]
-> **Mode:** [standard | full | full --split | full --single-doc]
-> **Tier:** [XL | L | M | S]  *(standard mode only)*
-> **Evidence quality:** [strong | partial | weak]
-> **Graph revision:** [N]
-> *(full mode)* Coverage: [K] systems, [N] subsystems documented. [M] subsystems as stubs.
-> *(full mode)* Files written: [list if split]
+> Generated: [date]
+> Scope: [repo | system | subsystem | module | symbol]
+> Mode: [standard | full]
+> Style: [narrative | reference | hybrid]
+> Evidence quality: [strong | partial | weak]
+> Coverage: [what was expanded vs summarized]
+
+## Part 1 — Narrative
+
+### 1. Overview
+- what the system is
+- what it does
+- why it exists
+
+### 2. Architecture
+- systems -> subsystems -> modules
+- boundaries and responsibilities
+- high-level structure
+
+### 3. How It Works
+- main execution flows
+- request or data lifecycle
+- orchestration paths
+
+### 4. Key Components
+- the most important modules, classes, or services
+- why they matter
+
+### 5. Dependencies & Relationships
+- major dependencies
+- cross-system interactions
+- important coupling points
+
+### 6. Risk & Complexity
+- high-risk areas
+- fragile components
+- change sensitivity
+
+### 7. How to Work With This Repo
+- where to start
+- how to navigate
+- common workflows
+- what to modify carefully
+
+### 8. Where to Go Deeper
+- next files, modules, or symbols to inspect
+- suggested exploration paths
+
+## Part 2 — Selective Reference
+
+### Module Summary
+For each major module:
+- purpose
+- responsibilities
+- dependencies
+- key contained components
+
+### Class / Service Summary
+For each important class or service:
+- role (orchestrator, boundary, helper, store, adapter, etc.)
+- what it manages
+- where it is used
+
+### Method Summary
+Only in `--full`, and only for key classes or services:
+- method name
+- 1-2 line role summary
+- role in the system, not implementation detail
+```
+
+### Reference layer rules
+- include only important modules or classes
+- if a module is obvious and low-risk, omit it
+- if multiple entities share a pattern, summarize the pattern once
+- do not add method summaries in default mode unless the user explicitly asks for reference-heavy output
 
 ---
 
-## 1. Overview
-## 2. Architecture
-## 3. Key Components
-## 4. Behavior & Flow
-## 5. Relationships
-## 6. Risk & Impact
-## 7. Architecture Health
-## 8. Recommendations
-## 9. Next Exploration Paths
+## Split output
+
+Use split output when:
+- `--split` is passed, or
+- `FULL=true` and the repo is large enough that one doc would become unwieldy
+
+Recommended structure:
+
+```markdown
+<OUT_DIR>/
+  index.md
+  <system-1>.md
+  <system-2>.md
+  ...
+  <lower-ranked-system>-stub.md
 ```
 
-Section content scales with mode and tier exactly as defined in the phase instructions above.
+### `index.md`
+Should contain:
+- overall overview
+- top-level architecture
+- the most important cross-system flows
+- repo navigation guidance
+- links to the per-system docs
+
+### Per-system docs
+Each system doc should contain:
+- the full narrative structure
+- a selective reference section for that system
+
+### Stubs
+For lower-ranked systems, create short stubs instead of full docs:
+- one-paragraph overview
+- top 3 important components
+- one risk note
+- clear instruction to rerun `ix-docs <system> --full` if deeper coverage is needed
+
+---
+
+## Success criteria
+
+The output is successful if:
+- a new engineer can understand the system quickly
+- an LLM can reason about the system without rereading dozens of files
+- the important parts are obvious
+- the main execution flow is understandable
+- guidance for deeper exploration is explicit
+
+The output has failed if:
+- it reads like a dump
+- low-level detail dominates the document
+- important components are buried
+- every module gets equal treatment
+- it gives no practical guidance on where to start
 
 ---
 
 ## Post-write confirmation
 
-```
+After writing the file or files, confirm:
+
+```text
 Documentation written.
 
-Mode:   [standard | full | full --split]
-Output: [OUT_PATH or list of files written]
-Scope:  [K] systems · [N] subsystems · [M] key components documented
-Graph revision: [N]
-Evidence quality: [strong | partial | weak]
+Mode:   [standard | full]
+Style:  [narrative | reference | hybrid]
+Output: [path or directory]
+Scope:  [repo/system/subsystem/module/symbol]
+Coverage: [systems/subsystems/components expanded]
 
-Summary: [2–3 sentences — most important architectural finding]
+Summary: [2-3 sentences on the system and the most important architectural fact]
 
-[Full mode only:]
-Stubs created for: [list of subsystems below rank threshold]
-To expand a stub: /ix-docs <subsystem-name>
+[If split:]
+Files written: [index + key system docs + stubs]
 ```
-
----
-
-## Budget table
-
-| | XL (normal) | L | M | S | Full mode |
-|---|---|---|---|---|---|
-| Entity explains | 0 | 3 | 5 | 1 | 5 per system, skip if confidence > 0.8 |
-| Callers fetched | N/A | 20, group > 15 | 20, group > 20 | all | 50 target + 20 per subsystem, always group > 15 |
-| Rank results | top 5 | top 10 | top 10 | N/A | top 20 global + top 10 per system |
-| Depends depth | 1 | 2 | 2 | 2 | 2 (3 with --depth 3) |
-| Code reads | 0 | 0 | 2 max | 1 | 5 max total (orchestrators + critical path only) |
-| Trace calls | 0 | 0 | 1 at depth ≥ 2 | 1 | 1 per top-level system at depth ≥ 2 |
-| Smells | high-severity only | path-scoped | path-scoped | skip | full, grouped by system |
-| Impact calls | 1 | 1 | 1 | 1 | 1 + up to 5 for high-centrality entities |
-
-**Grouping rule (all modes):** When caller/dependent count exceeds the cap, always summarize as *"N callers across X subsystems, primarily in [top 2–3 subsystem names]"* — never truncate silently.
-
-**Reuse rule:** Never re-run a command whose output was already collected in an earlier phase. Extract from existing results.
-
-**Ordering rule (full mode):** All expansion decisions — which systems to document fully, which entities to explain, which to stub — are driven by rank position and risk level. Never alphabetical, never first-N.

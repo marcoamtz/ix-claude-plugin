@@ -41,7 +41,7 @@ High-level cognitive skills — each one infers intent, orchestrates multiple gr
 | `/ix-plan <targets...>` | Risk-ordered implementation plan for a set of changes | Parallel impact, finds shared dependents |
 | `/ix-debug <symptom>` | Root cause analysis from symptom to candidates | Targeted reads at suspects only |
 | `/ix-architecture [scope]` | Design health: coupling, smells, hotspots | Graph only — never reads source |
-| `/ix-docs <target> [--out <path>] [--full] [--split] [--single-doc] [--concise] [--depth N] [--focus area]` | Generate full engineer-quality documentation to a file | Adaptive tier budget; `--full` for complete repo coverage with auto-split |
+| `/ix-docs <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]` | Generate narrative-first system documentation with a selective reference layer | Default is onboarding-focused; `--full --style hybrid` gives the deepest coverage |
 
 All skills fall back gracefully when ix is unavailable.
 

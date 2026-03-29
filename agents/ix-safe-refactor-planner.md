@@ -24,6 +24,14 @@ ix text   "$INPUT" --limit 10 --format json
 
 Identify 2–5 concrete symbols or files. If the target set is unclear, ask for clarification before proceeding.
 
+If the targets span unfamiliar or multiple subsystems, gather lightweight `ix-docs` context before impact analysis:
+```bash
+ix subsystems --format json
+ix overview <highest-risk-or-most-central-target> --format json
+```
+
+Use that context to identify subsystem boundaries, shared infrastructure, and the right level for the change plan.
+
 ### Step 2 — Impact each target (in parallel)
 
 For every identified target, run simultaneously:

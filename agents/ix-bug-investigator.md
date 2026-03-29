@@ -14,6 +14,24 @@ You are a debugging agent. Your job is to narrow from a symptom to root cause ca
 
 Each iteration: gather evidence → form hypothesis → decide if you need more data or can stop.
 
+### Step 0 — Context (only if the subsystem is unfamiliar or the bug crosses boundaries)
+
+Before tracing, build a lightweight `ix-docs`-style context:
+```bash
+ix subsystems --format json
+ix locate "$SYMPTOM" --limit 5 --format json
+```
+
+If the likely subsystem or boundary component is still unclear, add:
+```bash
+ix overview <likely-subsystem-or-component> --format json
+```
+
+Use this only to answer:
+- what part of the system the symptom likely belongs to
+- which subsystem boundaries may be involved
+- which orchestrator or boundary component is worth tracing first
+
 ### Step 1 — Locate the entry point
 
 ```bash
