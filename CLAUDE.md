@@ -64,7 +64,7 @@ When answering a question about the codebase:
 | Callers/callees | `--limit 15` cap |
 | Dependency tree | `--depth 2` max unless user asks for deeper |
 | Code reads | Symbol-level only, max 2 per task |
-| Traces | One trace per investigation |
+| Traces | One trace per investigation; `--depth 2` max |
 
 ---
 
@@ -75,10 +75,10 @@ When answering a question about the codebase:
 | `/ix-understand [target]` | Mental model of a system | Onboarding, architecture questions, "how does X work?" |
 | `/ix-investigate <symbol>` | Deep dive into a component | Before modifying, explaining, or debugging something |
 | `/ix-impact <target>` | Change risk analysis | Before any non-trivial edit |
-| `/ix-plan <targets...>` | Risk-ordered change plan | Multi-file changes, refactors |
-| `/ix-debug <symptom>` | Root cause analysis | Bug investigation, unexpected behavior |
-| `/ix-architecture [scope]` | Design health analysis | Code review, architecture discussions |
-| `/ix-docs <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]` | Write narrative-first docs with a selective reference layer | Onboarding docs, handoffs, deep reference |
+| `/ix-plan <targets...>` | Risk-ordered change plan; delegates to `ix-safe-refactor-planner` for targets with >20 dependents or region coupling >5 | Multi-file changes, refactors |
+| `/ix-debug <symptom>` | Root cause analysis; delegates to `ix-bug-investigator` for multi-subsystem or low-confidence bugs | Bug investigation, unexpected behavior |
+| `/ix-architecture [scope]` | Design health analysis; delegates to `ix-architecture-auditor` when ≥3 smells, god-module, or crosscut >0.1 | Code review, architecture discussions |
+| `/ix-docs <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]` | Write narrative-first docs; dispatches parallel `ix-system-explorer` agents for large targets in `--full` mode | Onboarding docs, handoffs, deep reference |
 
 `ix-docs` writes a narrative-first Markdown document (or split doc set) to disk. Each run starts with an onboarding-friendly narrative layer and ends with a selective reference section for the most important modules, classes, and, in `--full`, key methods. Output path auto-detects `docs/`, `doc/`, or workspace root if `--out` is omitted.
 
@@ -181,6 +181,8 @@ An invalid skill:
 | Read one symbol's source | `ix read <symbol> --format json` |
 | Trace call chain | `ix trace <symbol> --format json` |
 | Who calls it | `ix callers <symbol> --format json` |
+| What it calls | `ix callees <symbol> --limit 15 --format json` |
+| What imports it | `ix imported-by <path> --format json` |
 | Members of a class | `ix contains <symbol> --format json` |
 | Upstream dependents | `ix depends <symbol> --depth 2 --format json` |
 | Blast radius | `ix impact <target> --format json` |

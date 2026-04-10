@@ -55,10 +55,26 @@ Correlate: components that are both **highly central** and in **poorly-bounded s
 If Step 1–3 identify one region as clearly the worst:
 ```bash
 ix subsystems <region> --explain
-ix smells --path <region-path> --format json
+ix smells --format json
 ```
 
+`ix smells` is repo-wide only. Filter the results by path prefix after retrieval for the region being audited.
+
 **Hard limit:** One region. Do not audit every subsystem — identify the worst and analyze that.
+
+### Step 6 — Active plans cross-reference **[Pro]**
+
+```bash
+ix briefing --format json 2>&1
+```
+
+If it returns JSON with a `revision` field (Pro is available):
+- Extract `activePlans` and `recentDecisions`
+- For each active plan: check if it touches any region flagged in Steps 1–3
+- For each recent decision: check if it affects a high-risk component from Step 3
+- Include findings as a "Cross-reference: Active Plans vs Audit Findings" section in the report
+
+If `ix briefing` errors or returns no plans/decisions, skip this step entirely.
 
 ## Stop conditions
 
@@ -111,6 +127,12 @@ Highest-risk components (central + poorly bounded):
 ## What would improve scores
 
 [Specific reorganizations or extractions that would raise cohesion / lower coupling]
+
+## Cross-reference: Active Plans vs Audit Findings **[Pro — omit section if unavailable]**
+
+| Plan / Decision | Affected Region | Structural Risk |
+|----------------|----------------|----------------|
+| [plan name]    | [region]        | [risk note]     |
 ```
 
 **Every number in this report must come directly from ix output.** Label each finding with the metric it's based on.

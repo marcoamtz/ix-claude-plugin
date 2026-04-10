@@ -4,7 +4,17 @@ description: Deep dive into a symbol, feature, or bug. Graph-first, minimal code
 argument-hint: <symbol, feature description, or "how does X work">
 ---
 
+> [ix-claude-plugin shared model](../shared.md)
+
 Check `command -v ix` first. If unavailable, use Grep + Read as fallback.
+
+## Pro check (optional)
+
+Run once at the start:
+```bash
+ix briefing --format json 2>&1
+```
+If it returns JSON with a `revision` field, Pro is available. Extract `recentDecisions` and `openBugs` for use in Pro steps below. If it errors, skip all **[Pro]** labeled steps.
 
 ## Goal
 
@@ -13,7 +23,7 @@ Answer: *what is this, how does it connect, and what's the execution path?* Stop
 ## Phase 1 — Locate (always)
 
 ```bash
-ix locate $ARGUMENTS --limit 5 --format json
+ix locate $ARGUMENTS --format json
 ```
 
 If multiple matches: use `--kind`, `--path`, or `--pick N` to resolve. Do not proceed until the entity is unambiguous.
@@ -27,6 +37,17 @@ ix explain <resolved-symbol> --format json
 ```
 
 Extract: role, importance, caller count, callee count, confidence score.
+
+If the resolved entity is a **class or module**, also run:
+```bash
+ix overview <resolved-symbol> --format json
+```
+This reveals internal structure (members, sub-components) without reading source.
+
+**Orphan check:** If `fan_in = 0` AND `fan_out = 0` in the `ix explain` output:
+- Report: "Symbol is a graph orphan — no detected dependencies. Either the graph needs a refresh (`ix map`) or the file has no parseable import/call relationships."
+- Suggest `ix map <file>` as first step.
+- Stop here — skip Phases 3–5 unless the user specifically asks for source-level inspection.
 
 **Evaluate:** Is the explanation sufficient to answer the question?
 
@@ -67,6 +88,14 @@ Read **the symbol only** — never the full file. If the symbol is a class, read
 
 **Hard limit:** One `ix read` call maximum. If still unclear after reading, surface the ambiguity to the user rather than reading more.
 
+## Phase 6 — Design context **[Pro]**
+
+If Pro is available and `recentDecisions` from the briefing is non-empty, check for decisions affecting this symbol:
+```bash
+ix decisions --topic <resolved-symbol> --format json
+```
+Include any relevant decisions in the output under **Design context**.
+
 ## Output
 
 ```
@@ -82,6 +111,8 @@ Read **the symbol only** — never the full file. If the symbol is a class, read
 **Key connections:**
 - Depends on: [top 3 callees]
 - Used by: [top 3 callers with their subsystem]
+
+**Design context:** [Pro only — relevant recorded decisions, or omit section if none]
 
 **Evidence quality:** [strong / partial / uncertain] — [one-line reason]
 

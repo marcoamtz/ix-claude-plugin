@@ -25,7 +25,7 @@ This is NOT a quick summary. You should produce a document comparable to what a 
 
 ## Reasoning loop
 
-Work iteratively in expanding waves. Each step adds depth. Do NOT stop after Step 2 — always proceed through at least Step 4.
+Work iteratively in expanding waves. Each step adds depth. Always proceed through at least Step 3. For simple subsystems (< 10 files, < 3 major components), Steps 4 and 5 are optional — skip if the question is already answered.
 
 ### Step 1 — Orient (breadth)
 
@@ -45,6 +45,8 @@ Run all in parallel. From the results:
 - Note the scale of the codebase (total files, nodes, edges)
 - Identify regions with low cohesion or high coupling
 
+Stop condition: If the question is about overall architecture and this gives a clear picture → proceed to Output.
+
 ### Step 2 — Major pillars (depth on each)
 
 For EACH major system in scope (all systems if whole-repo, or the single system if scoped):
@@ -58,6 +60,8 @@ Run in parallel batches. For each system, extract:
 - Its role in the architecture
 - How it connects to other systems
 
+Stop condition: If you can describe the role, structure, and connections of each major system → proceed to Output.
+
 ### Step 3 — Key components deep dive
 
 For the top 3-10 most important components in scope (use orient data or Step 2 results):
@@ -70,16 +74,20 @@ Run in parallel. For each, extract:
 - Caller/callee counts and key relationships
 - Why it matters architecturally
 
+Stop condition: If you can describe the purpose and structural importance of each key component → proceed to Output.
+
 ### Step 4 — Data flows and patterns
 
 For the 1-3 most important execution flows in scope:
 ```bash
-ix trace <entry-point> --downstream --depth 3 --format json
+ix trace <entry-point> --downstream --depth 2 --format json
 ix callers <critical-function> --limit 15 --format json
 ix callees <critical-function> --limit 15 --format json
 ```
 
 Use these to reconstruct data flow diagrams. If the graph doesn't reveal enough, use `ix read <symbol>` for the key entry points to understand the pattern.
+
+Stop condition: If you have at least one traced flow and understand the primary data lifecycle → proceed to Step 5 or Output.
 
 ### Step 5 — Infrastructure and development (if applicable)
 
@@ -93,14 +101,18 @@ ix inventory --kind file --path cmd --limit 20 --format json
 
 If the graph doesn't cover build tooling, use Glob sparingly.
 
+Stop condition: If build/test infrastructure is clear → proceed to Output.
+
 ### Step 6 — Fill gaps with targeted reads (sparingly)
 
-For at most 3 key files where the graph left important patterns unclear:
+For at most 2 symbols where the graph left important patterns unclear:
 ```bash
 ix read <symbol> --format json
 ```
 
 Use this for: core type definitions, entry points, plugin registration patterns.
+
+Stop condition: Stop after 2 reads regardless. If critical patterns are clear before that → proceed to Output.
 
 ## Output format
 

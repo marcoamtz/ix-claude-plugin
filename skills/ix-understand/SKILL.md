@@ -4,6 +4,8 @@ description: Build a detailed architectural mental model of a system, subsystem,
 argument-hint: [target — subsystem name, path, or empty for whole repo]
 ---
 
+> [ix-claude-plugin shared model](../shared.md)
+
 Check `command -v ix` first. If unavailable, stop and say so.
 
 **MANDATORY: This skill MUST use the Agent tool (subagent_type: "ix-memory:ix-system-explorer") for all exploration work. Do NOT run ix commands yourself except for the Phase 1 orient commands below. All subsystem exploration MUST be delegated to agents.**
@@ -26,6 +28,10 @@ From the results, identify:
 - Total codebase scale (files, nodes, edges)
 
 If $ARGUMENTS specifies a target, scope the orient to that target's subsystems.
+
+**Confidence check:** Scan `confidence` scores in the `ix subsystems` results:
+- Any system with `confidence < 0.5`: add this caveat to the final output header: `⚠ Graph boundary confidence is low for [system] (${confidence}). Structural claims for this region may not reflect actual file relationships.`
+- Any system with `confidence < 0.3`: report fuzzy boundary as an explicit finding. Label **all** structural claims for that region as `[uncertain]`.
 
 ## Phase 2 — Decide: serial or parallel
 

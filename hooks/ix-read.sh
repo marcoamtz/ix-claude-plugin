@@ -23,24 +23,29 @@ case "$FILE_PATH" in
   */package-lock.json|*/yarn.lock|*/pnpm-lock.yaml|*/go.sum|*/Cargo.lock) exit 0 ;;
 esac
 
+# Skip ix impact for test/config/small files — they have no meaningful dependents
+SKIP_IMPACT=0
+case "$FILE_PATH" in
+  */test/*|*/tests/*|*/spec/*|*/__tests__/*|*/__mocks__/*) SKIP_IMPACT=1 ;;
+  *.test.*|*.spec.*|*_test.*)                              SKIP_IMPACT=1 ;;
+  *.config.*|*.yaml|*.yml|*.toml|*.ini|*.env|*.env.*)     SKIP_IMPACT=1 ;;
+  *tsconfig*.json|*jsconfig*.json)                         SKIP_IMPACT=1 ;;
+  */config/*|*/configs/*)                                  SKIP_IMPACT=1 ;;
+esac
+# Also skip for small files (< 50 lines) — impact not meaningful at that scale
+if [ "$SKIP_IMPACT" -eq 0 ] && [ -f "$FILE_PATH" ]; then
+  _line_count=$(wc -l < "$FILE_PATH" 2>/dev/null || echo 0)
+  [ "${_line_count:-0}" -lt 50 ] && SKIP_IMPACT=1
+fi
+
 command -v ix >/dev/null 2>&1 || exit 0
 
-# ── Error reporting ───────────────────────────────────────────────────────────
+# ── Shared library ────────────────────────────────────────────────────────────
 _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_HOOK_DIR}/ix-errors.sh" 2>/dev/null || true
+source "${_HOOK_DIR}/lib/index.sh"
 
-# ── Health check (30s TTL cache) ──────────────────────────────────────────────
-IX_HEALTH_CACHE="${TMPDIR:-/tmp}/ix-healthy"
 _now=$(date +%s)
-_cache_ok=0
-if [ -f "$IX_HEALTH_CACHE" ]; then
-  _cached=$(cat "$IX_HEALTH_CACHE" 2>/dev/null || echo 0)
-  (( (_now - _cached) < 30 )) && _cache_ok=1
-fi
-if [ "$_cache_ok" -eq 0 ]; then
-  ix status >/dev/null 2>&1 || exit 0
-  echo "$_now" > "$IX_HEALTH_CACHE"
-fi
+ix_health_check
 
 # ── Per-file TTL cache (5 min) — avoid repeating context for the same file ───
 IX_READ_CACHE_DIR="${TMPDIR:-/tmp}/ix-read-cache"
@@ -52,11 +57,6 @@ if [ -f "$_read_cache" ]; then
   (( (_now - _cached_read) < 300 )) && exit 0
 fi
 echo "$_now" > "$_read_cache"
-
-# ── Helper: strip ix header noise, extract JSON ───────────────────────────────
-parse_json() {
-  echo "$1" | awk '/^\[|^\{/{found=1} found{print}' | jq -c . 2>/dev/null || echo ""
-}
 
 # ── Run ix inventory + ix overview + ix impact in parallel ───────────────────
 FILENAME=$(basename "$FILE_PATH")
@@ -74,15 +74,18 @@ ix inventory --kind file --path "$FILENAME" --format json > "$_inv_tmp" 2>"$_inv
 _INV_PID=$!
 ix overview "$FILENAME" --format json                     > "$_ov_tmp"  2>"$_ov_err"  &
 _OV_PID=$!
-ix impact   "$FILENAME" --format json                     > "$_imp_tmp" 2>"$_imp_err" &
-_IMP_PID=$!
+_IMP_PID=""
+if [ "$SKIP_IMPACT" -eq 0 ]; then
+  ix impact "$FILENAME" --format json                     > "$_imp_tmp" 2>"$_imp_err" &
+  _IMP_PID=$!
+fi
 
 wait $_INV_PID || ix_capture_async "ix" "ix-inventory" "inventory failed" "$?" \
   "ix inventory $FILENAME" "$(head -3 "$_inv_err")"
 wait $_OV_PID  || ix_capture_async "ix" "ix-overview"  "overview failed"  "$?" \
   "ix overview $FILENAME"  "$(head -3 "$_ov_err")"
-wait $_IMP_PID || ix_capture_async "ix" "ix-impact"    "impact failed"    "$?" \
-  "ix impact $FILENAME"    "$(head -3 "$_imp_err")"
+[ -n "$_IMP_PID" ] && { wait $_IMP_PID || ix_capture_async "ix" "ix-impact" "impact failed" "$?" \
+  "ix impact $FILENAME"    "$(head -3 "$_imp_err")"; }
 
 INV_RAW=$(cat "$_inv_tmp")
 OV_RAW=$(cat "$_ov_tmp")
@@ -93,7 +96,15 @@ IMP_RAW=$(cat "$_imp_tmp")
 # ── Summarise overview: key definitions + children ────────────────────────
 OV_JSON=$(parse_json "$OV_RAW")
 ENTITY_PART=""
+CONF_WARN=""
 if [ -n "$OV_JSON" ]; then
+  # Gate on graph confidence before injecting structural data
+  _confidence=$(echo "$OV_JSON" | jq -r '(.confidence // 1) | tostring' 2>/dev/null || echo "1")
+  if awk "BEGIN {c=${_confidence}+0; exit !(c < 0.3)}"; then
+    exit 0  # confidence too low — skip injection entirely
+  elif awk "BEGIN {c=${_confidence}+0; exit !(c < 0.6)}"; then
+    CONF_WARN="⚠ Graph confidence low (${_confidence}) — treat structural data as approximate"
+  fi
   KEY_ITEMS=$(echo "$OV_JSON" | jq -r '[.keyItems[:5][].name] | join(", ")' 2>/dev/null || echo "")
   CHILDREN=$(echo "$OV_JSON" | jq -r '[.childrenByKind // {} | to_entries[] | "\(.value) \(.key)"] | join(", ")' 2>/dev/null || echo "")
   if [ -n "$KEY_ITEMS" ]; then
@@ -125,6 +136,7 @@ CONTEXT="[ix] ${FILENAME}"
 [ -n "$ENTITY_PART" ] && CONTEXT="${CONTEXT} — ${ENTITY_PART}"
 [ -n "$RISK_PART" ]   && CONTEXT="${CONTEXT} | ${RISK_PART}"
 CONTEXT="${CONTEXT} | Use ix read <symbol> to get just a symbol's source instead of the full file"
+[ -n "$CONF_WARN" ]   && CONTEXT="${CONF_WARN} | ${CONTEXT}"
 
 jq -n --arg ctx "$CONTEXT" '{"additionalContext": $ctx}'
 exit 0
