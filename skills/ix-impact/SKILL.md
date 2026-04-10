@@ -4,7 +4,17 @@ description: Change risk analysis — blast radius, affected systems, and what t
 argument-hint: <symbol or file>
 ---
 
+> [ix-claude-plugin shared model](../shared.md)
+
 Check `command -v ix` first. If unavailable, use Grep to find all usages and estimate impact manually.
+
+## Pro check (optional)
+
+Run once at the start:
+```bash
+ix briefing --format json 2>&1
+```
+If it returns JSON with a `revision` field, Pro is available. Extract `openBugs` for use in Pro steps below. If it errors, skip all **[Pro]** labeled steps.
 
 ## Goal
 
@@ -12,9 +22,16 @@ Answer: *what breaks if this changes, and is it safe to proceed?* Stop as early 
 
 ## Phase 1 — Risk score (always)
 
+Run in parallel:
 ```bash
-ix impact $ARGUMENTS --format json
+ix impact  $ARGUMENTS --format json
+ix explain $ARGUMENTS --format json
 ```
+
+**God-module check:** If `fan_out > 20 AND fan_in < 2` in the `ix explain` result:
+> ⚠ This symbol has high fan_out and low fan_in — it reaches out to many dependents but has few callers. Standard blast-radius metrics may understate risk. Check callers of its key dependencies, not just direct dependents.
+
+This caveat applies regardless of the `ix impact` risk classification.
 
 **Immediately classify:**
 
@@ -68,6 +85,16 @@ Cross-reference callers + dependents + importers to identify:
 - low: proceed, verify [specific callers]
 - medium: test [caller list] after change
 - high/critical: run `/ix-plan $ARGUMENTS` before editing
+
+**Known bugs in blast radius:** [Pro only — list open bugs touching callers/dependents, or omit section if none/Pro unavailable]
 ```
+
+## Phase 4 — Known bugs in blast radius **[Pro]**
+
+If Pro is available and `openBugs` from the briefing is non-empty, check for bugs affecting this target:
+```bash
+ix bugs --format json
+```
+Cross-reference open bugs against the direct callers and dependents identified in Phase 2. Any open bug touching the blast radius escalates the risk verdict — flag it explicitly in the output.
 
 Never read source code in this skill. Risk analysis is purely graph-based.

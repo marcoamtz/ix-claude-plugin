@@ -15,22 +15,11 @@ FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 # Bail silently if ix is not in PATH
 command -v ix >/dev/null 2>&1 || exit 0
 
-# ── Error reporting ───────────────────────────────────────────────────────────
+# ── Shared library ────────────────────────────────────────────────────────────
 _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_HOOK_DIR}/ix-errors.sh" 2>/dev/null || true
+source "${_HOOK_DIR}/lib/index.sh"
 
-# ── Health check (30s TTL cache) ─────────────────────────────────────────────
-IX_HEALTH_CACHE="${TMPDIR:-/tmp}/ix-healthy"
-_now=$(date +%s)
-_cache_ok=0
-if [ -f "$IX_HEALTH_CACHE" ]; then
-  _cached=$(cat "$IX_HEALTH_CACHE" 2>/dev/null || echo 0)
-  (( (_now - _cached) < 30 )) && _cache_ok=1
-fi
-if [ "$_cache_ok" -eq 0 ]; then
-  ix status >/dev/null 2>&1 || exit 0
-  echo "$_now" > "$IX_HEALTH_CACHE"
-fi
+ix_health_check
 
 # ── Map file (retry once on failure) ─────────────────────────────────────────
 _map_err=$(mktemp)

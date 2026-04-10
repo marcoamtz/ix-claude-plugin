@@ -4,6 +4,8 @@ description: Generate narrative-first, importance-weighted documentation for a r
 argument-hint: <target> [--full] [--style narrative|reference|hybrid] [--split] [--single-doc] [--out <path>]
 ---
 
+> [ix-claude-plugin shared model](../shared.md)
+
 Check `command -v ix` first. If unavailable, stop and say so.
 
 ## Goal
@@ -56,6 +58,13 @@ Every `ix-docs` run produces **two layers**:
 | `--split` | `SPLIT=true` | false |
 | `--single-doc` | `SINGLE=true` | false |
 | `--out <path>` | `OUT_PATH` | auto-detect |
+
+**Parsing**
+Scan `$ARGUMENTS` left to right:
+- The first token that does not begin with `--` is `TARGET`
+- `--style` and `--out` consume the next token as their value (also accept `--style=value` form)
+- All other flags are boolean toggles
+- If `TARGET` is missing, stop and ask the user to supply a target before continuing
 
 **Output rules**
 - `--single-doc` forces one Markdown file
@@ -155,16 +164,21 @@ Do not run every command mechanically. Reuse earlier results and stop when addit
 
 ### Phase 1 — Scope
 
+**Stop early:** If `TARGET` is an unambiguous symbol or small component and scope is clear from `ix stats` alone, skip the remaining Phase 1 commands and proceed to Phase 2.
+
 Always start with:
 ```bash
 ix stats --format json
 ix subsystems --format json
 ix subsystems --list --format json
+ix briefing --format json 2>&1
 ```
+
+**Pro check:** If `ix briefing` returns JSON with a `revision` field, Pro is available. Extract `activeGoals`, `recentDecisions`, and `recentChanges` for use in **[Pro]** steps. If it errors, skip all Pro-labeled steps — the skill works fully without them.
 
 If `TARGET` is not obviously the whole repo:
 ```bash
-ix locate "$TARGET" --limit 5 --format json
+ix locate "$TARGET" --format json
 ```
 
 Resolve whether the target is:
@@ -176,7 +190,39 @@ Resolve whether the target is:
 
 If ambiguous, resolve it before proceeding.
 
+### Parallel agent dispatch (large / full-mode runs)
+
+**Trigger:** `FULL=true` AND the target is a repo or top-level system with **more than 5 subsystems**.
+
+**Phase 1 reuse:** Before running Phase 1 commands, check whether subsystem and rank data is already present in context from a prior `/ix-understand` run in this session. If `ix subsystems` results and rank results are already available, skip those Phase 1 commands and use the cached data directly — do not re-run them.
+
+**Step 1 — Per-system agents:** From the Phase 1 rank results, select the top systems by importance (cap at 5). For each, spawn one `ix-system-explorer` agent in the background:
+
+> Task template: *"Build a complete architectural mental model of `$SYSTEM` within `$TARGET`. Focus on: (1) internal module structure and responsibilities, (2) the most important and most-coupled components, (3) main execution flows within this subsystem, (4) outbound dependencies and shared interfaces with other subsystems. Return structured findings with: a one-paragraph subsystem summary, top 5 important modules with roles, key internal flows, and coupling risks."*
+
+**Step 2 — Cross-cutting agent:** Immediately after spawning the per-system agents, spawn one additional `ix-system-explorer` agent for cross-system concerns:
+
+> Task: *"In the `$TARGET` codebase, identify only what crosses subsystem boundaries: (1) shared types, base classes, and utilities used across multiple subsystems, (2) cross-system execution flows and handoff points, (3) infrastructure or platform services that multiple systems depend on, (4) god-modules or highly-central components visible from the dependency graph. Do NOT explore individual subsystems in depth — focus exclusively on cross-cutting structure. Return structured findings."*
+
+**Do not wait** for any agent before starting Phase 2. Continue running Phase 2 commands while all agents work.
+
+**Step 3 — Synthesis (when agent results arrive):**
+
+Merge all agent findings with your Phase 2/3 graph results:
+
+- **Per-system outputs** → populate per-system narrative sections (Sections 2–6) and per-system doc files in split mode. Use the agent's module characterizations and coupling insights; keep your rank-based ordering as the primary importance signal.
+- **Cross-cutting output** → populate Section 5 (Dependencies & Relationships) and the cross-system sections of `index.md` in split mode.
+- **Conflict resolution:** if an agent contradicts graph data, note the discrepancy and prefer the graph.
+- **Failures:** if any agent fails or times out, continue without it — do not retry. Note the gap in the Coverage field of the document header.
+
+**Skip this dispatch entirely** if:
+- `FULL=false`
+- the target is a subsystem, module, or symbol
+- the repo has 5 or fewer subsystems
+
 ### Phase 2 — Architecture
+
+**Stop when:** you have identified the top 3-5 important components and the subsystem structure is clear. Do not run additional rank queries once the most central components are known.
 
 Use the graph to identify systems, subsystem boundaries, and the most important modules.
 
@@ -210,6 +256,8 @@ Full mode:
 
 ### Phase 3 — Behavior
 
+**Stop when:** the main execution flow is understood. Skip `ix trace` if `ix explain` results are sufficient — do not run a trace just to be thorough.
+
 This phase answers **how the system works**.
 
 Use:
@@ -236,6 +284,8 @@ Do not narrate every edge in a trace.
 
 ### Phase 4 — Relationships
 
+**Stop when:** for symbol-level or small single-module targets, skip this phase entirely — relationship data at that scope adds minimal value to the documentation.
+
 Map the important dependencies and coupling points.
 
 Use:
@@ -245,7 +295,7 @@ ix callees "$TARGET" --limit 15 --format json
 ix depends "$TARGET" --depth 2 --format json
 ```
 
-If `TARGET` is the whole repo, do not run repo-level callers or callees. Instead, run these commands for the top-ranked boundary components, orchestrators, or subsystem entry points and summarize the cross-subsystem edges they reveal.
+**Repo-level guard:** If `TARGET` is the whole repo, skip `ix callers "$TARGET"`, `ix callees "$TARGET"`, and `ix depends "$TARGET"` entirely — these commands are not meaningful at repo scope and will produce noise. Instead, run them for the top 3-5 boundary components, orchestrators, or subsystem entry points identified in Phase 2, and summarize the cross-subsystem edges they reveal.
 
 For repo or large system targets, focus on:
 - cross-system relationships
@@ -260,7 +310,9 @@ When counts are large:
 
 ### Phase 5 — Risk
 
-Always run:
+**Repo-level gate:** If `TARGET` is the whole repo, do not run `ix impact "$TARGET"` — impact analysis is not meaningful at repo scope. Skip directly to running `ix impact` for the top 3-5 high-centrality entities identified in Phase 2.
+
+Otherwise run:
 ```bash
 ix impact "$TARGET" --format json
 ```
@@ -276,14 +328,18 @@ Use this phase to populate:
 
 ### Phase 6 — Health
 
+**Stop when:** for symbol-level or single-module targets, skip this phase — health issues at that scope are rarely actionable at the documentation level.
+
 Use:
 ```bash
 ix smells --format json
 ```
 
-If the target is smaller than a full repo, scope it when supported:
+Note: `ix smells` does not support `--path` scoping — results are always repo-wide. If the target is a subsystem or module, filter results by path prefix after retrieval.
+
+**[Pro]** If Pro is available and `recentDecisions` is non-empty, include relevant architectural decisions in the risk and complexity section:
 ```bash
-ix smells --path "$TARGET" --format json
+ix decisions --format json
 ```
 
 Prioritize:
@@ -295,6 +351,8 @@ Prioritize:
 Group health issues by subsystem, not as a flat dump.
 
 ### Phase 7 — Optional reads
+
+**Stop when:** you reach the read budget. Never exceed it regardless of how many unclear behaviors remain — omit or note gaps instead.
 
 Only read code when graph data is insufficient for an important behavior.
 
@@ -353,6 +411,7 @@ Use this structure.
 - what the system is
 - what it does
 - why it exists
+- **[Pro]** active project goals this system serves (from `ix briefing` activeGoals), if available
 
 ### 2. Architecture
 - systems -> subsystems -> modules

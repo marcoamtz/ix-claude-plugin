@@ -4,85 +4,112 @@ description: Analyze system design — structure, coupling, code smells, and hig
 argument-hint: [optional scope — path, subsystem name, or empty for whole system]
 ---
 
-Check `command -v ix` first. If unavailable, stop and say so — this skill requires a graph.
+> [ix-claude-plugin shared model](../shared.md)
 
-## Goal
+## Health gate
 
-Answer: *how healthy is this system's design, where are the weak boundaries, and what should be improved?* Never reads source code — structural analysis only.
-
-## Phase 1 — Structure (always)
-
-Run in parallel:
+Before anything else, run:
 ```bash
-ix subsystems --format json
+command -v ix
+ix status
+```
+If either fails, stop: *"ix graph unavailable — run `ix connect` or check your connection."*
+
+Then verify the graph has data:
+```bash
 ix subsystems --list --format json
 ```
+If the result is empty or returns an error, stop: *"No graph data yet — run `ix map` to build the graph first."*
 
-If `$ARGUMENTS` is provided, also run:
+## Pro check
+
 ```bash
-ix subsystems $ARGUMENTS --explain
-ix subsystems $ARGUMENTS --format json
+ix briefing --format json 2>&1
+```
+If it returns JSON with a `revision` field, Pro is available. Note `recentDecisions` for use below. Skip all **[Pro]** steps if it errors.
+
+---
+
+## Phase 1 — Subsystem structure
+
+```bash
+ix subsystems --format json
 ```
 
-Extract:
-- Region hierarchy (systems → subsystems → modules)
-- Cohesion scores per region (higher = more self-contained)
-- External coupling per region (lower = better)
-- `crosscut_score` > 0.1 → cross-cutting concern (design smell)
-- `confidence` < 0.6 → fuzzy boundary (uncertain region)
+Filter results to `$ARGUMENTS` scope if provided (match on subsystem name or path prefix). Store the full JSON as `SUBSYSTEMS`.
 
-## Phase 2 — Smells
+**Early-stop gate:** Examine each region's metrics. If ALL of the following are true across every region:
+- `cohesion > 0.7`
+- `coupling < 0.4`
+- `crosscut_score ≤ 0.1` (or field absent)
+- `confidence ≥ 0.6`
+
+→ Report *"System appears structurally healthy — no significant coupling, cohesion, or crosscutting issues detected."* List subsystems with their metrics and stop. Do not proceed to Phase 2.
+
+---
+
+## Phase 2 — Smell analysis
 
 ```bash
 ix smells --format json
 ```
 
-If `$ARGUMENTS` scopes to a path:
+Filter to scope if `$ARGUMENTS` was provided. Store as `SMELLS`.
+
+**Health gate — choose one path:**
+
+**Inline path** (all must be true):
+- Smell count < 3
+- No `god-module` smell present
+- No smell has `crosscut_score > 0.1`
+
+→ Synthesize the report inline using `SUBSYSTEMS` + `SMELLS`. Proceed to Phase 3 only if needed (see below). Skip delegation.
+
+**Delegate path** (any is true):
+- Smell count ≥ 3
+- A `god-module` smell is present
+- Any smell has `crosscut_score > 0.1`
+
+→ Spawn the **ix-architecture-auditor** agent. Pass `SUBSYSTEMS` and `SMELLS` directly in the agent prompt so it can skip its own Steps 1–4 (subsystem + smell collection). Include the scope from `$ARGUMENTS`. Relay the agent's complete output to the user, then skip to the **[Pro] Cross-reference decisions** step.
+
+---
+
+## Phase 3 — Hotspot ranking (inline path only)
+
+Run `ix rank` only if at least one of the following is true:
+- A `god-module` smell exists in `SMELLS` (even on the inline path)
+- Any region in `SUBSYSTEMS` has `coupling > 0.5`
+
 ```bash
-ix smells --path $ARGUMENTS --format json
+ix rank --by dependents --kind class --top 10 --exclude-path test --format json
 ```
 
-Classify each finding: `orphan` / `god-module` / `weak-component`.
+Identify the top-ranked components that overlap with smell findings or high-coupling regions. Include these as hotspots in the inline report.
 
-## Phase 3 — Hotspots (only if smells are found or coupling is high)
+If neither condition is met, skip `ix rank` entirely.
 
-Run only if Phase 1 or 2 revealed significant issues:
+---
+
+## Inline report format
+
+When taking the inline path, produce:
+
+**Summary** — one sentence verdict on overall health.
+
+**Subsystem overview** — table of regions with cohesion, coupling, crosscut_score.
+
+**Smells** — list each smell with affected symbol and severity.
+
+**Hotspots** — (if Phase 3 ran) top-ranked components that coincide with smells or high-coupling regions.
+
+**Recommended action** — one concrete next step.
+
+---
+
+## [Pro] Cross-reference decisions
+
+If Pro is available, after the report (inline or delegated) is complete:
 ```bash
-ix rank --by dependents --kind class    --top 10 --exclude-path test --format json
-ix rank --by dependents --kind function --top 10 --exclude-path test --format json
+ix decisions --format json
 ```
-
-Correlate: are the most-depended-on entities also in poorly-bounded subsystems? These are the highest-risk components.
-
-## Output
-
-```
-## Architecture Analysis
-
-### System Structure
-[Region hierarchy with file counts. Flag: low-confidence boundaries, high-coupling regions, cross-cutting modules.]
-
-### Health Scores
-| Region | Cohesion | Ext. Coupling | Boundary Ratio | Flag |
-|--------|----------|---------------|----------------|------|
-| [name] | [0-1]    | [0-1]         | [ratio]        | [⚠ if bad] |
-
-### Code Smells
-**High severity:**
-- [smell type] in [file/module] — [why it matters]
-
-**Medium severity:**
-- ...
-
-### Hotspots
-[Top components where structural debt + centrality combine — highest risk for changes]
-
-### Improvement Areas
-1. [specific issue] — [concrete suggestion]
-2. ...
-
-### What's healthy
-[Briefly note well-structured areas — not everything is a problem]
-```
-
-**Evidence:** All claims must cite graph data (cohesion scores, smell counts, rank positions). No speculative design advice without structural evidence.
+Append a **Recorded Decisions** section cross-referencing relevant design decisions against the findings — especially decisions that affect god-modules, high-coupling regions, or identified hotspots.
