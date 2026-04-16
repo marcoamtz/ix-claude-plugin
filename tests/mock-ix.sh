@@ -11,6 +11,7 @@
 #   IX_MOCK_OVERVIEW_FILE  — path to fixture for `ix overview` (default: overview_normal.json)
 #   IX_MOCK_IMPACT_FILE    — path to fixture for `ix impact`   (default: impact_high.json)
 #   IX_MOCK_INVENTORY_FILE — path to fixture for `ix inventory`(default: inventory_results.json)
+#   IX_MOCK_BRIEFING_FILE  — path to fixture for `ix briefing` (default: briefing.json)
 #   IX_MOCK_FAIL=1         — exit 1 for all data-returning commands (simulates ix failure)
 
 SUBCOMMAND="${1:-}"
@@ -43,8 +44,10 @@ case "$SUBCOMMAND" in
     exit 0
     ;;
   briefing)
-    # Called by ix_check_pro as `ix briefing --help`; return success to signal Pro available
-    exit 0
+    if [ "${2:-}" = "--help" ]; then
+      exit 0
+    fi
+    cat "${IX_MOCK_BRIEFING_FILE:-${FX}/briefing.json}"
     ;;
   status)
     # Called by ix_capture_async (fire-and-forget); silently succeed

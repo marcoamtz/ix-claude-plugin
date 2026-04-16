@@ -4,8 +4,9 @@
 # Fires after Claude finishes each response. Runs ix map asynchronously to
 # keep the architectural graph current so the next session starts fresh.
 #
-# Annotation (the "ix: ..." summary) is handled by ix-annotate.sh, which runs
-# synchronously before this hook so the message appears before the session ends.
+# System-message annotation (when enabled) is handled by ix-annotate.sh, which
+# runs synchronously before this hook so the message appears before the session
+# ends. Model-authored "Ix:" lines are injected earlier by ix-briefing.sh.
 
 set -euo pipefail
 

@@ -10,7 +10,7 @@
 #   IX_HEALTH_CACHE         — path to the health-check TTL file
 #   IX_PRO_CACHE            — path to the pro-check cache file
 #   ix_health_check         — validate ix availability, emit one-time notice if missing
-#   ix_check_pro            — check ix pro is available (exits caller if not); call after ix_health_check
+#   ix_check_pro            — check ix pro is available; returns 0/1 after ix_health_check
 #   parse_json              — strip ix header noise, extract first JSON value
 #   ix_confidence_gate      — evaluate confidence; sets CONF_GATE (drop|warn|ok) and CONF_WARN
 #   ix_looks_like_secret    — returns 0 if pattern looks like a secret/token; 1 otherwise
@@ -60,7 +60,7 @@ ix_health_check() {
 }
 
 # ── Pro check (TTL tied to health check) ─────────────────────────────────────
-# Exits the calling script with 0 if ix pro is not available.
+# Returns 0 when ix briefing is available, 1 otherwise.
 # Re-checks pro only when health was just refreshed (avoids redundant ix calls).
 # Call after ix_health_check.
 ix_check_pro() {
@@ -72,7 +72,7 @@ ix_check_pro() {
     echo "$_health_ts" > "${IX_PRO_CACHE}.ts"
   fi
   _pro_val=$(cat "$IX_PRO_CACHE" 2>/dev/null || echo "0")
-  [ "$_pro_val" = "1" ] || exit 0
+  [ "$_pro_val" = "1" ]
 }
 
 # ── Helper: strip ix header noise, extract first JSON array/object ────────────

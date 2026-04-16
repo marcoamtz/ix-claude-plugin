@@ -2,16 +2,22 @@
 # ix-annotate.sh — Stop hook (synchronous)
 #
 # Fires after Claude finishes each response. Reads the per-turn ledger written
-# by all relevant hooks and emits a short attribution summary of what ix did.
+# by all relevant hooks and emits a short attribution summary of what ix did
+# when system-message annotation is enabled.
 #
 # Runs synchronously so the systemMessage appears before the session ends.
 # Fast — no ix commands, just reads the local JSONL ledger file.
+# When IX_ANNOTATE_CHANNEL=modelSuffix, this hook stays silent and lets Claude
+# write the final "Ix:" line based on earlier [ix] context.
 #
 # Set IX_ANNOTATE_MODE=off to silence.
 
 set -euo pipefail
 
 [ "${IX_ANNOTATE_MODE:-brief}" != "off" ] || exit 0
+case "${IX_ANNOTATE_CHANNEL:-modelSuffix}" in
+  modelSuffix) exit 0 ;;
+esac
 
 INPUT=$(cat)
 

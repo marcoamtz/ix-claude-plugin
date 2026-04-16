@@ -156,10 +156,37 @@ _BASH_LS_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name":"Bash","tool_input":{"command":"ls -la src/"},"cwd":"/repo"}' \
   > "${_BASH_LS_FIXTURE}"
 
+# ── User-prompt fixture for ix-briefing.sh ───────────────────────────────────
+_USER_PROMPT_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '{"session_id":"test-session-001","prompt":"explain the auth flow"}' > "${_USER_PROMPT_FIXTURE}"
+
 # ── Markdown-file edit fixture (should be skipped by ix-pre-edit.sh) ─────────
 _EDIT_MD_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name":"Edit","tool_input":{"file_path":"/repo/README.md","old_string":"foo","new_string":"bar"},"cwd":"/repo"}' \
   > "${_EDIT_MD_FIXTURE}"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ix-briefing.sh — prompt briefing and model-authored attribution instruction
+# ═════════════════════════════════════════════════════════════════════════════
+section "ix-briefing.sh"
+
+run_hook ix-briefing.sh "${_USER_PROMPT_FIXTURE}" IX_ANNOTATE_MODE=brief IX_ANNOTATE_CHANNEL=modelSuffix
+if [ "${_RC}" -ne 0 ]; then
+  fail "briefing/model-authored annotation instruction" "expected exit 0, got ${_RC}"
+elif [ -z "${_OUT}" ]; then
+  fail "briefing/model-authored annotation instruction" "expected JSON output, got nothing"
+elif ! echo "${_OUT}" | jq -e '.additionalContext' >/dev/null 2>&1; then
+  fail "briefing/model-authored annotation instruction" "missing additionalContext — output: ${_OUT:0:120}"
+else
+  _ctx=$(echo "${_OUT}" | jq -r '.additionalContext // empty' 2>/dev/null || true)
+  if [[ "${_ctx}" != *"[ix] Session briefing:"* ]]; then
+    fail "briefing/model-authored annotation instruction" "missing session briefing in additionalContext"
+  elif [[ "${_ctx}" != *'Use one terse sentence by default; use two short sentences only if one sentence would be awkward.'* ]]; then
+    fail "briefing/model-authored annotation instruction" "missing model-authored Ix instruction"
+  else
+    pass "briefing/model-authored annotation instruction"
+  fi
+fi
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-intercept.sh — Grep and Glob
@@ -319,11 +346,25 @@ else
   _OUT=$(env \
     HOME="${_annotate_home}" \
     TMPDIR="${_annotate_tmp}" \
+    IX_ANNOTATE_MODE="brief" \
+    IX_ANNOTATE_CHANNEL="systemMessage" \
     IX_LEDGER_MODE="on" \
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
   assert_system_message "annotate/stop hook emits ix summary" "ix uses the code graph and session context"
+
+  _RC=0
+  _OUT=$(env \
+    HOME="${_annotate_home}" \
+    TMPDIR="${_annotate_tmp}" \
+    IX_ANNOTATE_MODE="brief" \
+    IX_ANNOTATE_CHANNEL="modelSuffix" \
+    IX_LEDGER_MODE="on" \
+    IX_ERROR_MODE="off" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+  assert_empty "annotate/modelSuffix mode stays silent"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
