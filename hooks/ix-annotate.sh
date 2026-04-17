@@ -26,7 +26,7 @@ _json_escape() {
 _emit_model_context() {
   local _msg="${1:-}"
   [ -n "$_msg" ] || return 0
-  local _instruction="Ix activity this turn: $_msg Write one sentence at the end of your response starting with 'Ix:' summarizing what Ix did."
+  local _instruction="After your response, on a new line, write exactly one sentence beginning with 'Ix:' describing what Ix did this turn. Activity to summarize: $_msg"
   printf '{"systemMessage":"%s"}\n' "$(_json_escape "$_instruction")"
 }
 
@@ -138,7 +138,11 @@ _brief_from_records() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 _records=$(ix_ledger_last_turn "${INPUT:-}" 2>/dev/null || true)
+# printf '{"systemMessage":"DEBUG ledger: %s"}\n' "$(_json_escape "${_records:-EMPTY}")"
 _attr=$(_brief_from_records "${_records:-}")
+if [ -z "${_attr:-}" ] && _has_records "${_records:-}"; then
+  _attr="Ix hooks fired this turn but produced no attributable activity."
+fi
 [ -n "${_attr:-}" ] || exit 0
 
 _emit_model_context "$_attr"
