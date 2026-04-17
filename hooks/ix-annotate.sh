@@ -27,7 +27,7 @@ _emit_model_context() {
   local _msg="${1:-}"
   [ -n "$_msg" ] || return 0
   local _instruction="Ix activity this turn: $_msg Write one sentence at the end of your response starting with 'Ix:' summarizing what Ix did."
-  printf '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$(_json_escape "$_instruction")"
+  printf '{"systemMessage":"%s"}\n' "$(_json_escape "$_instruction")"
 }
 
 INPUT=$(cat)

@@ -151,6 +151,20 @@ assert_system_message() {
   pass "${_name}"
 }
 
+assert_no_hook_specific_output() {
+  local _name="$1"
+  if [ "${_RC}" -ne 0 ]; then
+    fail "${_name}" "expected exit 0, got ${_RC}"; return
+  fi
+  if [ -z "${_OUT}" ]; then
+    fail "${_name}" "expected JSON output, got nothing"; return
+  fi
+  if echo "${_OUT}" | jq -e '.hookSpecificOutput' >/dev/null 2>&1; then
+    fail "${_name}" "unexpected hookSpecificOutput present — output: ${_OUT:0:120}"; return
+  fi
+  pass "${_name}"
+}
+
 run_ix_hook_decide() {
   local _mode="$1" _content="$2"; shift 2
   _RC=0
@@ -515,6 +529,7 @@ else
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
   assert_system_message "annotate/stop hook emits ix summary" "Ix helped by surfacing a relevant symbol before search."
+  assert_no_hook_specific_output "annotate/stop hook uses top-level output contract"
 
   _RC=0
   _OUT=$(env \
