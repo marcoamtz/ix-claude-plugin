@@ -32,6 +32,10 @@ if [ "$TOOL" = "Grep" ]; then
   if [ "${IX_SKIP_SECRET_PATTERNS:-1}" = "1" ] && ix_looks_like_secret "$PATTERN"; then
     exit 0
   fi
+  ix_query_intent "$PATTERN"
+  if [ "$QUERY_INTENT" = "literal" ]; then
+    exit 0
+  fi
 
   PATH_ARG=$(echo "$INPUT" | jq -r '.tool_input.path // empty')
   LANG_ARG=$(echo "$INPUT" | jq -r '.tool_input.type // empty')
@@ -45,22 +49,34 @@ if [ "$TOOL" = "Grep" ]; then
 
   # Gate on graph confidence from locate result
   CONF_WARN=""
+  HOOK_MODE="allow"
+  _loc_type=""
+  _loc_name=""
+  _loc_path=""
   if [ -n "$_LOC_RAW" ]; then
     _LOC_JSON=$(parse_json "$_LOC_RAW")
     if [ -n "$_LOC_JSON" ]; then
       _confidence=$(echo "$_LOC_JSON" | jq -r '(.confidence // (.resolvedTarget.confidence // 1)) | tostring' 2>/dev/null || echo "1")
       ix_confidence_gate "${_confidence:-1}"
       [ "$CONF_GATE" = "drop" ] && { LOC_PART=""; }
+      _loc_type=$(echo "$_LOC_JSON" | jq -r '.resolvedTarget.type // .resolvedTarget.kind // "unknown"' 2>/dev/null || echo "")
+      _loc_name=$(echo "$_LOC_JSON" | jq -r '.resolvedTarget.name // ""' 2>/dev/null || echo "")
+      _loc_path=$(echo "$_LOC_JSON" | jq -r '.resolvedTarget.path // ""' 2>/dev/null || echo "")
+      if [ "${IX_BLOCK_ON_HIGH_CONFIDENCE:-1}" = "1" ] && [ "$QUERY_INTENT" = "symbol" ] && \
+         [ "$CONF_GATE" = "ok" ] && [ -n "$_loc_name" ] && [ -n "$_loc_path" ]; then
+        HOOK_MODE="block"
+      fi
     fi
   fi
 
-  [ -z "$TEXT_PART" ] && [ -z "$LOC_PART" ] && exit 0
-
-  CONTEXT="[ix] '${PATTERN}'"
+  CONTEXT="[ix text + ix locate] '${PATTERN}'"
   [ -n "$LOC_PART" ]  && CONTEXT="${CONTEXT} — ${LOC_PART}"
   [ -n "$TEXT_PART" ] && CONTEXT="${CONTEXT} | ${TEXT_PART}"
   CONTEXT="${CONTEXT} | Use ix explain/trace/impact for deeper analysis, ix read <symbol> for source"
   [ -n "$CONF_WARN" ] && CONTEXT="${CONF_WARN} | ${CONTEXT}"
+  if [ "$HOOK_MODE" != "block" ] && [ -n "$LOC_PART" ]; then
+    HOOK_MODE="augment"
+  fi
 
 # ── Glob: file pattern search ─────────────────────────────────────────────────
 elif [ "$TOOL" = "Glob" ]; then
@@ -69,6 +85,16 @@ elif [ "$TOOL" = "Glob" ]; then
 
   PATH_ARG=$(echo "$INPUT" | jq -r '.tool_input.path // empty')
   [ -z "$PATH_ARG" ] && exit 0
+
+  # Intent classification — allow literal globs through without ix
+  GLOB_INTENT="architecture"
+  if printf '%s\n' "$PATTERN" | grep -qE '^\*\.[a-zA-Z0-9]+$'; then
+    GLOB_INTENT="literal"
+  fi
+  if printf '%s\n' "$PATTERN" | grep -qE '^[^*]+/[^*]+$'; then
+    GLOB_INTENT="literal"
+  fi
+  [ "$GLOB_INTENT" = "literal" ] && exit 0
 
   INV_ARGS=("--format" "json" "--path" "$PATH_ARG")
 
@@ -91,7 +117,12 @@ elif [ "$TOOL" = "Glob" ]; then
 
   [ "${TOTAL:-0}" -eq 0 ] && exit 0
 
-  CONTEXT="[ix] glob '${PATTERN}' in ${PATH_ARG}: ${TOTAL} entities"
+  GLOB_HOOK_MODE="augment"
+  if [ "${IX_BLOCK_ON_HIGH_CONFIDENCE:-1}" = "1" ] && [ "${TOTAL:-0}" -gt 0 ] && [ "${TOTAL:-0}" -le 20 ]; then
+    GLOB_HOOK_MODE="block"
+  fi
+
+  CONTEXT="[ix inventory] '${PATTERN}' in ${PATH_ARG}: ${TOTAL} entities"
   [ -n "$SAMPLE" ] && CONTEXT="${CONTEXT} — ${SAMPLE}$([ "${TOTAL}" -gt 5 ] && echo ' ...' || echo '')"
 
 else
@@ -102,20 +133,33 @@ fi
 
 _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
 if [ "$TOOL" = "Grep" ]; then
-  ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+  if [ "$HOOK_MODE" = "block" ]; then
+    REASON="[ix text + ix locate] '${PATTERN}'"
+    REASON="${REASON}"$'\n'"Found: ${_loc_name} (${_loc_type:-unknown}) at ${_loc_path}"
+    [ -n "$TEXT_PART" ] && REASON="${REASON}"$'\n'"${TEXT_PART}"
+    REASON="${REASON}"$'\n'"Next: ix read ${_loc_name} | ix explain ${_loc_name}"
+    ix_ledger_append "PreToolUse" "Grep" "${#REASON}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+    echo "ix locate '${PATTERN}' → ${_loc_name} at ${_loc_path} [BLOCKED]" >&2
+    ix_hook_fallback "block" "$REASON" "$CONTEXT"
+  elif [ "$HOOK_MODE" = "augment" ]; then
+    ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+    echo "ix text + ix locate: '${PATTERN}' → ${LOC_PART:-no exact match} | ${TEXT_PART:-no text hits}" >&2
+    ix_hook_fallback "augment" "$CONTEXT"
+  else
+    exit 0
+  fi
 else
-  ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms"
-fi
-
-if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
-  jq -n --arg ctx "$CONTEXT" '{
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "permissionDecision": "allow",
-      "additionalContext": $ctx
-    }
-  }'
-else
-  jq -n --arg ctx "$CONTEXT" '{"additionalContext": $ctx}'
+  if [ "${GLOB_HOOK_MODE:-augment}" = "block" ]; then
+    _first_sample=$(printf '%s' "$SAMPLE" | cut -d',' -f1 | tr -d ' ')
+    REASON="[ix inventory] '${PATTERN}' in ${PATH_ARG}: ${TOTAL} entities — ${SAMPLE}"
+    [ -n "$_first_sample" ] && REASON="${REASON} | Next: ix overview ${_first_sample}"
+    ix_ledger_append "PreToolUse" "Glob" "${#REASON}" "inventory" "1" "" "$_elapsed_ms"
+    echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities [BLOCKED]" >&2
+    ix_hook_fallback "block" "$REASON" "$CONTEXT"
+  else
+    ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms"
+    echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities" >&2
+    ix_hook_fallback "augment" "$CONTEXT"
+  fi
 fi
 exit 0

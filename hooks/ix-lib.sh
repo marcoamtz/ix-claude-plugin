@@ -13,6 +13,9 @@
 #   ix_check_pro            — check ix pro is available; returns 0/1 after ix_health_check
 #   parse_json              — strip ix header noise, extract first JSON value
 #   ix_confidence_gate      — evaluate confidence; sets CONF_GATE (drop|warn|ok) and CONF_WARN
+#   ix_hook_decide          — emit block/augment/allow output in legacy or structured format
+#   ix_hook_fallback        — degrade block/augment decisions to augment/allow when empty
+#   ix_query_intent         — classify Grep patterns as symbol-like or literal
 #   ix_looks_like_secret    — returns 0 if pattern looks like a secret/token; 1 otherwise
 #   ix_run_text_locate      — run ix text + ix locate in parallel
 #   ix_summarize_text       — summarise text results → TEXT_PART
@@ -166,6 +169,114 @@ ix_confidence_gate() {
     CONF_GATE="warn"
     CONF_WARN="⚠ Graph confidence low (${_c}) — treat structural data as approximate"
   fi
+}
+
+# ── Hook output decision helper ──────────────────────────────────────────────
+# Usage: ix_hook_decide <mode> <content>
+#   mode    — "block" | "augment" | "allow"
+#   content — reason string (block) or context string (augment); ignored for allow
+# Emits the correct Claude Code JSON and exits.
+ix_hook_decide() {
+  local _mode="$1"
+  local _content="${2:-}"
+  case "$_mode" in
+    block)
+      if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
+        jq -cn --arg r "$_content" '{
+          "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "block",
+            "reason": $r
+          }
+        }'
+      else
+        jq -cn --arg r "$_content" '{"decision": "block", "reason": $r}'
+      fi
+      ;;
+    augment)
+      if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
+        jq -cn --arg c "$_content" '{
+          "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": $c
+          }
+        }'
+      else
+        jq -cn --arg c "$_content" '{"additionalContext": $c}'
+      fi
+      ;;
+    allow|*)
+      exit 0
+      ;;
+  esac
+  exit 0
+}
+
+# ── Hook output fallback helper ──────────────────────────────────────────────
+# Usage: ix_hook_fallback <intended_mode> <content> [<augment_fallback_content>]
+# Fallback chain: block → augment → allow, augment → allow.
+ix_hook_fallback() {
+  local _intended="$1"
+  local _content="${2:-}"
+  local _augment_fallback="${3:-}"
+
+  case "$_intended" in
+    block)
+      if [ -n "$_content" ]; then
+        ix_hook_decide "block" "$_content"
+      elif [ -n "$_augment_fallback" ]; then
+        ix_hook_decide "augment" "$_augment_fallback"
+      else
+        ix_hook_decide "allow" ""
+      fi
+      ;;
+    augment)
+      if [ -n "$_content" ]; then
+        ix_hook_decide "augment" "$_content"
+      else
+        ix_hook_decide "allow" ""
+      fi
+      ;;
+    *)
+      ix_hook_decide "allow" ""
+      ;;
+  esac
+}
+
+# ── Grep query-intent classifier ─────────────────────────────────────────────
+# Usage: ix_query_intent <pattern>
+# Sets global: QUERY_INTENT ("symbol" | "literal")
+# "symbol" → pattern looks like a code symbol/system query → pursue ix lookup
+# "literal" → pattern looks like a string/log/doc search → allow native tool
+ix_query_intent() {
+  local _p="$1"
+  QUERY_INTENT="symbol"
+
+  # Pure regex indicators → literal
+  if printf '%s\n' "$_p" | grep -qE '[*+?]|[][()]|\\\w|\{[0-9]|\^[^^]|\$$'; then
+    QUERY_INTENT="literal"; return
+  fi
+
+  # Common string/log/doc search patterns → literal
+  if printf '%s\n' "$_p" | grep -qiE '^(TODO|FIXME|HACK|NOTE|XXX|DEPRECATED|error:|warn:|info:|debug:|fatal:)'; then
+    QUERY_INTENT="literal"; return
+  fi
+
+  # Multi-word patterns are usually prose/log searches, not symbol lookups.
+  if printf '%s\n' "$_p" | grep -q '[[:space:]]'; then
+    QUERY_INTENT="literal"; return
+  fi
+
+  # Very long patterns (>60 chars) are likely log lines or prose → literal
+  [ "${#_p}" -gt 60 ] && { QUERY_INTENT="literal"; return; }
+
+  # Quoted strings (starts and ends with quote) → literal
+  if printf '%s\n' "$_p" | grep -qE "^['\"].*['\"]$"; then
+    QUERY_INTENT="literal"; return
+  fi
+
+  # Otherwise treat as potential symbol — let confidence gating decide
 }
 
 # ── Secret / high-entropy pattern detector ───────────────────────────────────

@@ -37,6 +37,8 @@ _brief_from_records() {
   _has_records "$_records" || return 0
 
   local _parts=()
+  local _edit_count=0
+  local _decide_msg=""
 
   # Briefing (Pro session context)
   if printf '%s\n' "$_records" | jq -e 'any(.[]; .tool == "Briefing")' >/dev/null 2>&1; then
@@ -78,13 +80,15 @@ _brief_from_records() {
     [.[] | select(.hook_event=="PreToolUse" and (.tool=="Edit" or .tool=="Write" or .tool=="MultiEdit")) | (.risk//""|ascii_downcase) | select(length>0)]
     | map({r:.,s:sev(.)}) | sort_by(.s) | last? | .r // ""
   ' 2>/dev/null || echo "")
-  if printf '%s\n' "$_records" | jq -e 'any(.[]; .hook_event == "PreToolUse" and (.tool == "Edit" or .tool == "Write" or .tool == "MultiEdit"))' >/dev/null 2>&1; then
+  _edit_count=$(printf '%s\n' "$_records" | jq '[.[] | select(.hook_event == "PreToolUse" and (.tool == "Edit" or .tool == "Write" or .tool == "MultiEdit"))] | length' 2>/dev/null || echo 0)
+  if [ "${_edit_count:-0}" -gt 0 ]; then
     case "$_edit_risk" in
       critical) _parts+=("warned about a critical-risk edit") ;;
       high)     _parts+=("warned about a high-risk edit") ;;
       medium)   _parts+=("noted a medium-risk edit") ;;
       *)        _parts+=("checked blast radius before edit") ;;
     esac
+    _decide_msg=" This turn included ${_edit_count} edit(s); note what changed, why, and any follow-ups. Use ix impact if blast radius is unclear."
   fi
 
   [ "${#_parts[@]}" -gt 0 ] || return 0
@@ -101,6 +105,7 @@ _brief_from_records() {
     fi
   done
   _out+="."
+  [ -n "$_decide_msg" ] && _out+="${_decide_msg}"
   printf '%s' "$_out"
 }
 

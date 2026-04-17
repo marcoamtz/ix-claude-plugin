@@ -63,7 +63,7 @@ assert_empty() {
 # Assert exit 0, valid JSON with additionalContext containing a given prefix.
 # Also enforces the 10 000-char injection cap.
 assert_additional_context() {
-  local _name="$1" _prefix="${2:-[ix]}"
+  local _name="$1" _prefix="${2:-[ix}"
   if [ "${_RC}" -ne 0 ]; then
     fail "${_name}" "expected exit 0, got ${_RC}"; return
   fi
@@ -83,6 +83,25 @@ assert_additional_context() {
   fi
   if [ "${#_OUT}" -gt 10000 ]; then
     fail "${_name}" "output exceeds 10000-char injection cap: ${#_OUT} chars"; return
+  fi
+  pass "${_name}"
+}
+
+assert_block_decision() {
+  local _name="$1" _needle="${2:-}"
+  if [ "${_RC}" -ne 0 ]; then
+    fail "${_name}" "expected exit 0, got ${_RC}"; return
+  fi
+  if [ -z "${_OUT}" ]; then
+    fail "${_name}" "expected JSON output, got nothing"; return
+  fi
+  if ! echo "${_OUT}" | jq -e '.decision == "block" and (.reason | type == "string")' >/dev/null 2>&1; then
+    fail "${_name}" "expected block decision JSON — output: ${_OUT:0:140}"; return
+  fi
+  local _reason
+  _reason=$(echo "${_OUT}" | jq -r '.reason // empty' 2>/dev/null || true)
+  if [ -n "${_needle}" ] && [[ "${_reason}" != *"${_needle}"* ]]; then
+    fail "${_name}" "reason missing '${_needle}' — got: ${_reason:0:180}"; return
   fi
   pass "${_name}"
 }
@@ -132,6 +151,34 @@ assert_system_message() {
   pass "${_name}"
 }
 
+run_ix_hook_decide() {
+  local _mode="$1" _content="$2"; shift 2
+  _RC=0
+  _OUT=$(env "$@" bash -lc '
+    source "'"${HOOKS_DIR}"'/lib/index.sh"
+    ix_hook_decide "$1" "$2"
+  ' _ "${_mode}" "${_content}" 2>/dev/null) || _RC=$?
+}
+
+run_ix_hook_fallback() {
+  local _mode="$1" _content="$2" _augment="$3"; shift 3
+  _RC=0
+  _OUT=$(env "$@" bash -lc '
+    source "'"${HOOKS_DIR}"'/lib/index.sh"
+    ix_hook_fallback "$1" "$2" "$3"
+  ' _ "${_mode}" "${_content}" "${_augment}" 2>/dev/null) || _RC=$?
+}
+
+run_ix_query_intent() {
+  local _pattern="$1"; shift
+  _RC=0
+  _OUT=$(env "$@" bash -lc '
+    source "'"${HOOKS_DIR}"'/lib/index.sh"
+    ix_query_intent "$1"
+    printf "%s\n" "$QUERY_INTENT"
+  ' _ "${_pattern}" 2>/dev/null) || _RC=$?
+}
+
 # ── Minimal "no-tool" fixture (causes hooks to exit early with no output) ─────
 _EMPTY_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name": "", "tool_input": {}, "cwd": "/repo"}' > "${_EMPTY_FIXTURE}"
@@ -155,6 +202,19 @@ printf '{"tool_name":"Bash","tool_input":{"command":"grep -r '\''AuthService'\''
 _BASH_LS_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name":"Bash","tool_input":{"command":"ls -la src/"},"cwd":"/repo"}' \
   > "${_BASH_LS_FIXTURE}"
+
+# ── Grep literal/symbol fixtures for E2 ──────────────────────────────────────
+_GREP_TODO_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '{"tool_name":"Grep","tool_input":{"pattern":"TODO","path":"src/"},"cwd":"/repo"}' \
+  > "${_GREP_TODO_FIXTURE}"
+
+_GREP_PHRASE_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '{"tool_name":"Grep","tool_input":{"pattern":"timeout exceeded","path":"src/"},"cwd":"/repo"}' \
+  > "${_GREP_PHRASE_FIXTURE}"
+
+_GREP_DOTTED_SYMBOL_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '{"tool_name":"Grep","tool_input":{"pattern":"auth_middleware.login","path":"src/"},"cwd":"/repo"}' \
+  > "${_GREP_DOTTED_SYMBOL_FIXTURE}"
 
 # ── User-prompt fixture for ix-briefing.sh ───────────────────────────────────
 _USER_PROMPT_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
@@ -193,17 +253,107 @@ fi
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-intercept.sh"
 
-# Plain symbol → text + locate → additionalContext
+run_ix_hook_decide block "test reason"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_hook_decide legacy block" "expected exit 0, got ${_RC}"
+elif [ -z "${_OUT}" ]; then
+  fail "lib/ix_hook_decide legacy block" "expected JSON output, got nothing"
+elif ! echo "${_OUT}" | jq -e '.decision == "block" and .reason == "test reason"' >/dev/null 2>&1; then
+  fail "lib/ix_hook_decide legacy block" "unexpected output: ${_OUT:0:120}"
+else
+  pass "lib/ix_hook_decide legacy block"
+fi
+
+run_ix_hook_decide block "test reason" IX_HOOK_OUTPUT_STYLE=structured
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_hook_decide structured block" "expected exit 0, got ${_RC}"
+elif [ -z "${_OUT}" ]; then
+  fail "lib/ix_hook_decide structured block" "expected JSON output, got nothing"
+elif ! echo "${_OUT}" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "block" and .hookSpecificOutput.reason == "test reason"' >/dev/null 2>&1; then
+  fail "lib/ix_hook_decide structured block" "unexpected output: ${_OUT:0:140}"
+else
+  pass "lib/ix_hook_decide structured block"
+fi
+
+run_ix_hook_fallback block "" "[ix fallback] augment context"
+assert_additional_context "lib/ix_hook_fallback block degrades to augment" "[ix fallback]"
+
+run_ix_hook_fallback augment "" ""
+assert_empty "lib/ix_hook_fallback augment degrades to allow"
+
+run_ix_query_intent "TODO"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_query_intent TODO literal" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "literal" ]; then
+  fail "lib/ix_query_intent TODO literal" "expected literal, got: ${_OUT}"
+else
+  pass "lib/ix_query_intent TODO literal"
+fi
+
+run_ix_query_intent "timeout exceeded"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_query_intent phrase literal" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "literal" ]; then
+  fail "lib/ix_query_intent phrase literal" "expected literal, got: ${_OUT}"
+else
+  pass "lib/ix_query_intent phrase literal"
+fi
+
+run_ix_query_intent "AuthService"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_query_intent symbol" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "symbol" ]; then
+  fail "lib/ix_query_intent symbol" "expected symbol, got: ${_OUT}"
+else
+  pass "lib/ix_query_intent symbol"
+fi
+
+run_ix_query_intent "auth_middleware.login"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_query_intent dotted symbol" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "symbol" ]; then
+  fail "lib/ix_query_intent dotted symbol" "expected symbol, got: ${_OUT}"
+else
+  pass "lib/ix_query_intent dotted symbol"
+fi
+
+run_ix_query_intent '\w+\.ts$'
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_query_intent regex literal" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "literal" ]; then
+  fail "lib/ix_query_intent regex literal" "expected literal, got: ${_OUT}"
+else
+  pass "lib/ix_query_intent regex literal"
+fi
+
+# Plain symbol → high-confidence exact match → block
 run_hook ix-intercept.sh "${FX_IN}/grep_plain.json"
-assert_additional_context "intercept/grep plain symbol"
+assert_block_decision "intercept/grep plain symbol blocks" "Next: ix read AuthService | ix explain AuthService"
 
-# Regex pattern → locate suppressed, text still runs → additionalContext
+# TODO marker → literal search, hook stays silent
+run_hook ix-intercept.sh "${_GREP_TODO_FIXTURE}"
+assert_empty "intercept/grep TODO literal"
+
+# Phrase search → literal search, hook stays silent
+run_hook ix-intercept.sh "${_GREP_PHRASE_FIXTURE}"
+assert_empty "intercept/grep phrase literal"
+
+# Dotted symbol → still treated as symbol lookup and blocks on exact match
+run_hook ix-intercept.sh "${_GREP_DOTTED_SYMBOL_FIXTURE}"
+assert_block_decision "intercept/grep dotted symbol blocks" "Found: AuthService (class) at src/auth.ts"
+
+# Regex pattern → literal search, hook stays silent
 run_hook ix-intercept.sh "${FX_IN}/grep_regex.json"
-assert_additional_context "intercept/grep regex (text only)"
+assert_empty "intercept/grep regex literal"
 
-# Glob → inventory → additionalContext with "glob"
+# Medium-confidence candidates → native Grep runs with additionalContext
+run_hook ix-intercept.sh "${FX_IN}/grep_plain.json" \
+  IX_MOCK_LOCATE_FILE="${FX_IX}/locate_candidates.json"
+assert_additional_context "intercept/medium confidence candidates augment" "[ix text + ix locate]"
+
+# Glob → inventory → block when result set is manageable
 run_hook ix-intercept.sh "${FX_IN}/glob_path.json"
-assert_additional_context "intercept/glob pattern" "[ix] glob"
+assert_block_decision "intercept/glob pattern blocks" "Next: ix overview AuthService"
 
 # Empty / no-tool input → exit 0, no output
 run_hook ix-intercept.sh "${_EMPTY_FIXTURE}"
@@ -217,14 +367,26 @@ assert_empty "intercept/secret pattern suppressed"
 run_hook ix-intercept.sh "${FX_IN}/grep_plain.json" IX_MOCK_FAIL=1
 assert_empty "intercept/ix failure degrades gracefully"
 
-# Low-confidence locate → CONF_GATE=drop → LOC_PART cleared; text still shown
+# Low-confidence locate → allow native Grep with no injection
 run_hook ix-intercept.sh "${FX_IN}/grep_plain.json" \
   IX_MOCK_LOCATE_FILE="${FX_IX}/locate_low_confidence.json"
-assert_additional_context "intercept/low confidence locate (text survives)"
+assert_empty "intercept/low confidence locate allows native Grep"
 
-# Structured output format
+# Escape hatch disables blocking even for exact high-confidence matches
+run_hook ix-intercept.sh "${FX_IN}/grep_plain.json" IX_BLOCK_ON_HIGH_CONFIDENCE=0
+assert_additional_context "intercept/block escape hatch augments" "[ix text + ix locate]"
+
+# Structured output format for block mode
 run_hook ix-intercept.sh "${FX_IN}/grep_plain.json" IX_HOOK_OUTPUT_STYLE=structured
-assert_structured "intercept/structured output mode"
+if [ "${_RC}" -ne 0 ]; then
+  fail "intercept/structured block output mode" "expected exit 0, got ${_RC}"
+elif [ -z "${_OUT}" ]; then
+  fail "intercept/structured block output mode" "expected JSON output, got nothing"
+elif ! echo "${_OUT}" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse" and .hookSpecificOutput.permissionDecision == "block" and (.hookSpecificOutput.reason | contains("Next: ix read AuthService"))' >/dev/null 2>&1; then
+  fail "intercept/structured block output mode" "unexpected output: ${_OUT:0:180}"
+else
+  pass "intercept/structured block output mode"
+fi
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-read.sh
@@ -365,6 +527,37 @@ else
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
   assert_empty "annotate/modelSuffix mode stays silent"
+fi
+
+_annotate_edit_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
+_annotate_edit_home="${_annotate_edit_tmp}/home"
+mkdir -p "${_annotate_edit_home}"
+
+_seed_edit_rc=0
+_OUT=$(env \
+  HOME="${_annotate_edit_home}" \
+  TMPDIR="${_annotate_edit_tmp}" \
+  IX_HEALTH_CACHE="${_annotate_edit_tmp}/ix-healthy" \
+  IX_MAP_LOCK_PATH="${_annotate_edit_tmp}/ix-map.lock" \
+  IX_LEDGER_MODE="on" \
+  IX_ERROR_MODE="off" \
+  PATH="${TESTS_DIR}:${PATH}" \
+  bash "${HOOKS_DIR}/ix-pre-edit.sh" < "${FX_IN}/edit_high_risk.json" >/dev/null 2>/dev/null) || _seed_edit_rc=$?
+
+if [ "${_seed_edit_rc}" -ne 0 ]; then
+  fail "annotate/seed edit ledger" "expected pre-edit hook to succeed, got ${_seed_edit_rc}"
+else
+  _RC=0
+  _OUT=$(env \
+    HOME="${_annotate_edit_home}" \
+    TMPDIR="${_annotate_edit_tmp}" \
+    IX_ANNOTATE_MODE="brief" \
+    IX_ANNOTATE_CHANNEL="systemMessage" \
+    IX_LEDGER_MODE="on" \
+    IX_ERROR_MODE="off" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+  assert_system_message "annotate/post-decision nudge after edits" "This turn included 1 edit(s); note what changed, why, and any follow-ups."
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
