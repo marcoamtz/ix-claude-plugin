@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# DISABLED — removed from hooks.json per Phase E spec.
+# The additive Read hook added 3 ix commands of overhead without preventing
+# the file read. Behavioral steering is handled by CLAUDE.md + briefing hook.
+# To re-enable: add Read matcher back to hooks.json.
+# Optional future use: fire only for files >300 lines with high graph coverage.
+#
 # ix-read.sh — PreToolUse hook for Read
 #
 # Fires before Claude reads a file. Runs ix inventory + ix overview + ix impact
@@ -148,7 +154,14 @@ fi
 
 [ -z "$ENTITY_PART" ] && [ -z "$RISK_PART" ] && exit 0
 
-CONTEXT="[ix] ${FILENAME}"
+_cmds="ix inventory + ix overview"
+[ "$SKIP_IMPACT" -eq 0 ] && _cmds="${_cmds} + ix impact"
+_stderr_line="${_cmds}: ${FILENAME}"
+[ -n "$ENTITY_PART" ] && _stderr_line="${_stderr_line} → ${ENTITY_PART}"
+[ -n "$RISK_PART" ]   && _stderr_line="${_stderr_line} | ${RISK_PART}"
+echo "$_stderr_line" >&2
+
+CONTEXT="[${_cmds}] ${FILENAME}"
 [ -n "$ENTITY_PART" ] && CONTEXT="${CONTEXT} — ${ENTITY_PART}"
 [ -n "$RISK_PART" ]   && CONTEXT="${CONTEXT} | ${RISK_PART}"
 CONTEXT="${CONTEXT} | ${READ_HINT}"
