@@ -23,17 +23,18 @@ _json_escape() {
   printf '%s' "${1:-}" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
-_emit_system_message() {
+_emit_model_context() {
   local _msg="${1:-}"
   [ -n "$_msg" ] || return 0
-  printf '{"systemMessage":"%s"}\n' "$(_json_escape "$_msg")"
+  local _instruction="Ix activity this turn: $_msg Write one sentence at the end of your response starting with 'Ix:' summarizing what Ix did."
+  printf '{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"%s"}}\n' "$(_json_escape "$_instruction")"
 }
 
 INPUT=$(cat)
 
 [ -n "${INPUT:-}" ] || exit 0
 [ -n "$(command -v jq 2>/dev/null)" ] || {
-  _emit_system_message "Ix annotate is enabled but unavailable; jq is required for attribution."
+  _emit_model_context "Ix annotate is enabled but unavailable; jq is required for attribution."
   exit 0
 }
 
@@ -41,12 +42,12 @@ _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _HOOK_LIB_INDEX="${IX_HOOK_LIB_INDEX:-${_HOOK_DIR}/lib/index.sh}"
 
 if ! source "${_HOOK_LIB_INDEX}" 2>/dev/null; then
-  _emit_system_message "Ix annotate is enabled but unavailable; shared hook helpers failed to load."
+  _emit_model_context "Ix annotate is enabled but unavailable; shared hook helpers failed to load."
   exit 0
 fi
 
 if ! declare -F ix_ledger_last_turn >/dev/null 2>&1; then
-  _emit_system_message "Ix annotate is enabled but unavailable; ledger helpers are missing."
+  _emit_model_context "Ix annotate is enabled but unavailable; ledger helpers are missing."
   exit 0
 fi
 
@@ -140,5 +141,5 @@ _records=$(ix_ledger_last_turn "${INPUT:-}" 2>/dev/null || true)
 _attr=$(_brief_from_records "${_records:-}")
 [ -n "${_attr:-}" ] || exit 0
 
-_emit_system_message "$_attr"
+_emit_model_context "$_attr"
 exit 0
