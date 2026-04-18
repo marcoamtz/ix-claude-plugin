@@ -31,7 +31,9 @@ _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_HOOK_DIR}/lib/index.sh"
 
 ix_health_check
+IX_HOOK_NAME="ix-pre-edit"
 _t0=$(date +%s%3N 2>/dev/null || echo 0)
+ix_log "ENTRY tool=$TOOL file=$FILE_PATH"
 
 # ── Run impact on the file ────────────────────────────────────────────────────
 FILENAME=$(basename "$FILE_PATH")
@@ -46,11 +48,13 @@ else
   REL_PATH="$FILENAME"
 fi
 
+ix_log "RUN ix impact $REL_PATH"
 _imp_err=$(mktemp)
 RAW=$(ix impact "$REL_PATH" --format json 2>"$_imp_err") || {
   _exit=$?
   ix_capture_async "ix" "ix-impact" "ix impact failed for $REL_PATH" "$_exit" \
     "ix impact $REL_PATH" "$(head -3 "$_imp_err")"
+  ix_log "FAILED ix impact exit=$_exit"
   rm -f "$_imp_err"
   exit 0
 }
@@ -72,11 +76,13 @@ NEXT_STEP=$(echo "$IMPACT_JSON"     | jq -r '.nextStep // ""')
 # Use whichever count is higher — directDependents for symbols, memberLevelCallers for files
 EFFECTIVE_DEPS=$(( DIRECT_DEPS > MEMBER_CALLERS ? DIRECT_DEPS : MEMBER_CALLERS ))
 
+ix_log "IMPACT risk=$RISK_LEVEL deps=$EFFECTIVE_DEPS file=$REL_PATH"
+
 # ── Only warn when impact is meaningful ──────────────────────────────────────
-[ "$RISK_LEVEL" = "unknown" ] && exit 0
-[ "$RISK_LEVEL" = "low" ] && exit 0
+[ "$RISK_LEVEL" = "unknown" ] && { ix_log "SKIP risk=unknown (not in graph)"; exit 0; }
+[ "$RISK_LEVEL" = "low" ] && { ix_log "SKIP risk=low (no warning needed)"; exit 0; }
 # Require at least 3 effective dependents to avoid noise on leaf files
-[ "${EFFECTIVE_DEPS:-0}" -lt 3 ] 2>/dev/null && exit 0
+[ "${EFFECTIVE_DEPS:-0}" -lt 3 ] 2>/dev/null && { ix_log "SKIP deps=$EFFECTIVE_DEPS < 3 threshold"; exit 0; }
 
 # ── Format one-line warning ───────────────────────────────────────────────────
 case "$RISK_LEVEL" in
@@ -91,6 +97,7 @@ WARNING="${PREFIX} — ${FILENAME} has ${EFFECTIVE_DEPS} dependents. ${RISK_SUMM
 [ -n "$NEXT_STEP" ]   && WARNING="${WARNING} → ${NEXT_STEP}"
 
 _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
+ix_log "DECISION warn risk=$RISK_LEVEL deps=$EFFECTIVE_DEPS (${_elapsed_ms}ms)"
 ix_ledger_append "PreToolUse" "Edit" "${#WARNING}" "impact" "1" "${RISK_LEVEL:-}" "$_elapsed_ms"
 
 if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then

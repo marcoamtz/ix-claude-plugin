@@ -23,10 +23,13 @@ _json_escape() {
 
 _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_HOOK_DIR}/lib/index.sh" 2>/dev/null || exit 0
+IX_HOOK_NAME="ix-annotate"
 
-ix_health_check || exit 0
+ix_health_check || { ix_log "SKIP ix not available"; exit 0; }
+ix_log "ENTRY mode=${IX_ANNOTATE_MODE:-brief}"
 
 _instruction="If the Ix Memory plugin provided any [ix ...] context during this turn (visible in tool additionalContext), append a single 'Ix:' line at the very end of your response. One sentence, specific: what did Ix find, flag, or prevent, and why did it help? For example: what symbol was located, what blast radius was surfaced, or what grep scan was skipped. Only include the Ix: line if [ix] context actually appeared this turn — omit it entirely otherwise."
 
+ix_log "DECISION injecting systemMessage (${#_instruction} chars)"
 printf '{"systemMessage":"%s"}\n' "$(_json_escape "$_instruction")"
 exit 0

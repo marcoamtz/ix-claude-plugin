@@ -47,9 +47,12 @@ fi
 
 # ── Health + pro check ────────────────────────────────────────────────────────
 ix_health_check
+IX_HOOK_NAME="ix-briefing"
 _t0=$(date +%s%3N 2>/dev/null || echo 0)
+ix_log "ENTRY mode=${_mode:-off} channel=${_channel:-?} fresh=${_briefing_fresh}"
 BRIEFING=""
 if [ "$_briefing_fresh" -eq 0 ] && ix_check_pro; then
+  ix_log "RUN ix briefing (stale, Pro available)"
   _bfr_err=$(mktemp)
   BRIEFING=$(ix briefing --format json 2>"$_bfr_err") || {
     _exit=$?
@@ -60,6 +63,11 @@ if [ "$_briefing_fresh" -eq 0 ] && ix_check_pro; then
   }
   rm -f "$_bfr_err"
   [ -n "$BRIEFING" ] && { echo "$_now"; echo "$BRIEFING"; } > "$IX_BRIEFING_CACHE"
+  ix_log "BRIEFING result=${#BRIEFING} chars"
+elif [ "$_briefing_fresh" -eq 1 ]; then
+  ix_log "SKIP briefing TTL fresh"
+else
+  ix_log "SKIP briefing (no Pro or failed)"
 fi
 
 _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
@@ -77,7 +85,8 @@ fi
   fi
 }
 
-[ -n "$_context" ] || exit 0
+[ -n "$_context" ] || { ix_log "DECISION silent (no content to inject)"; exit 0; }
+ix_log "DECISION injecting ${#_context} chars additionalContext"
 
 jq -n --arg ctx "$_context" '{"additionalContext": $ctx}'
 exit 0

@@ -297,6 +297,16 @@ ix_looks_like_secret() {
   return 1
 }
 
+# ── Debug log helper ─────────────────────────────────────────────────────────
+# Set IX_DEBUG_LOG=/tmp/ix-hooks.log (or any path) to enable.
+# Each hook sets IX_HOOK_NAME before calling this.
+ix_log() {
+  [ -z "${IX_DEBUG_LOG:-}" ] && return 0
+  local _ts
+  _ts=$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo "?")
+  printf '[%s] [%s] %s\n' "$_ts" "${IX_HOOK_NAME:-hook}" "$*" >> "${IX_DEBUG_LOG}" 2>/dev/null || true
+}
+
 # ── Summarise ix locate results ───────────────────────────────────────────────
 # Usage: ix_summarize_locate RAW_OUTPUT
 # Sets global: LOC_PART (empty string if no results)
