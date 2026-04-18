@@ -12,6 +12,8 @@
 #   ix_health_check         — validate ix availability, emit one-time notice if missing
 #   ix_check_pro            — check ix pro is available; returns 0/1 after ix_health_check
 #   ix_normalize_path_for_ix — convert absolute hook paths into ix-usable relative scopes
+#   ix_log_command          — log a fully expanded ix CLI command
+#   ix_log_injection        — log exact injected hook content with escaped newlines
 #   parse_json              — strip ix header noise, extract first JSON value
 #   ix_confidence_gate      — evaluate confidence; sets CONF_GATE (drop|warn|ok) and CONF_WARN
 #   ix_hook_decide          — emit block/augment/allow output in legacy or structured format
@@ -113,6 +115,26 @@ ix_normalize_path_for_ix() {
   basename "$_path"
 }
 
+# ── Debug log helpers ────────────────────────────────────────────────────────
+# Usage: ix_log_command ix text foo --format json
+# Logs a shell-escaped command line so hook runs are easy to replay manually.
+ix_log_command() {
+  [ -z "${IX_DEBUG_LOG:-}" ] && return 0
+  local _rendered
+  printf -v _rendered '%q ' "$@"
+  _rendered="${_rendered% }"
+  ix_log "CMD ${_rendered}"
+}
+
+# Usage: ix_log_injection additionalContext "$CONTEXT"
+# Logs the exact injected content with newlines escaped as JSON string syntax.
+ix_log_injection() {
+  [ -z "${IX_DEBUG_LOG:-}" ] && return 0
+  local _label="$1" _content="${2:-}" _escaped
+  _escaped=$(printf '%s' "$_content" | jq -Rs . 2>/dev/null || printf '%s' "$_content")
+  ix_log "INJECT ${_label}=${_escaped}"
+}
+
 # ── Helper: strip ix header noise, extract first JSON array/object ────────────
 parse_json() {
   echo "$1" | awk '/^\[|^\{/{found=1} found{print}' | jq -c . 2>/dev/null || echo ""
@@ -132,6 +154,7 @@ ix_run_text_locate() {
   _text_tmp=$(mktemp); _loc_tmp=$(mktemp)
   _text_err=$(mktemp); _loc_err=$(mktemp)
 
+  ix_log_command ix text "${_TEXT_ARGS[@]}"
   ix text "${_TEXT_ARGS[@]}" > "$_text_tmp" 2>"$_text_err" &
   _TEXT_PID=$!
 
@@ -151,8 +174,11 @@ ix_run_text_locate() {
   fi
   _LOC_PID=""
   if [ "$_is_plain" -eq 1 ]; then
+    ix_log_command ix locate "$_pattern" --format json
     ix locate "$_pattern" --format json > "$_loc_tmp" 2>"$_loc_err" &
     _LOC_PID=$!
+  else
+    ix_log "SKIP ix locate pattern treated as non-plain"
   fi
 
   wait "$_TEXT_PID" || ix_capture_async "ix" "ix-text" "text search failed" "$?" \

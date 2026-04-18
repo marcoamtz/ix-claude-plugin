@@ -262,6 +262,37 @@ else
   fi
 fi
 
+_briefing_repeat_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
+_RC=0
+_OUT=$(env \
+  TMPDIR="${_briefing_repeat_tmp}" \
+  IX_HEALTH_CACHE="${_briefing_repeat_tmp}/ix-healthy" \
+  IX_MAP_DEBOUNCE_FILE="${_briefing_repeat_tmp}/ix-map-last" \
+  IX_MAP_LOCK_PATH="${_briefing_repeat_tmp}/ix-map.lock" \
+  IX_LEDGER_MODE="off" \
+  IX_INGEST_INJECT="off" \
+  IX_ERROR_MODE="off" \
+  IX_ANNOTATE_MODE="brief" \
+  IX_ANNOTATE_CHANNEL="modelSuffix" \
+  PATH="${TESTS_DIR}:${PATH}" \
+  bash "${HOOKS_DIR}/ix-briefing.sh" < "${_USER_PROMPT_FIXTURE}" 2>/dev/null) || _RC=$?
+assert_additional_context "briefing/model-authored annotation repeats each turn" "[ix meta] Attribution:"
+
+_RC=0
+_OUT=$(env \
+  TMPDIR="${_briefing_repeat_tmp}" \
+  IX_HEALTH_CACHE="${_briefing_repeat_tmp}/ix-healthy" \
+  IX_MAP_DEBOUNCE_FILE="${_briefing_repeat_tmp}/ix-map-last" \
+  IX_MAP_LOCK_PATH="${_briefing_repeat_tmp}/ix-map.lock" \
+  IX_LEDGER_MODE="off" \
+  IX_INGEST_INJECT="off" \
+  IX_ERROR_MODE="off" \
+  IX_ANNOTATE_MODE="brief" \
+  IX_ANNOTATE_CHANNEL="modelSuffix" \
+  PATH="${TESTS_DIR}:${PATH}" \
+  bash "${HOOKS_DIR}/ix-briefing.sh" < "${_USER_PROMPT_FIXTURE}" 2>/dev/null) || _RC=$?
+assert_additional_context "briefing/model-authored annotation persists on fresh cache" "[ix meta] Attribution:"
+
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-intercept.sh — Grep and Glob
 # ═════════════════════════════════════════════════════════════════════════════

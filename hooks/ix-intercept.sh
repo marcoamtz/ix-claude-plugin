@@ -117,6 +117,7 @@ elif [ "$TOOL" = "Glob" ]; then
   INV_ARGS=("--kind" "file" "--format" "json" "--path" "$INV_PATH")
 
   ix_log "RUN ix inventory raw_path='$PATH_ARG' normalized_path='$INV_PATH' cwd='${CWD:-${PWD:-}}'"
+  ix_log_command ix inventory "${INV_ARGS[@]}"
   _inv_err=$(mktemp)
   INV_RAW=$(ix inventory "${INV_ARGS[@]}" 2>"$_inv_err") || {
     _exit=$?
@@ -166,6 +167,7 @@ if [ "$TOOL" = "Grep" ]; then
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   elif [ "$HOOK_MODE" = "augment" ]; then
     ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+    ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix text + ix locate: '${PATTERN}' → ${LOC_PART:-no exact match} | ${TEXT_PART:-no text hits}" >&2
     ix_hook_fallback "augment" "$CONTEXT"
   else
@@ -181,6 +183,7 @@ else
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   else
     ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms"
+    ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities" >&2
     ix_hook_fallback "augment" "$CONTEXT"
   fi

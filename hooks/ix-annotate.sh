@@ -38,6 +38,7 @@ esac
 if ! declare -F ix_ledger_last_turn >/dev/null 2>&1; then
   _fallback="Ix attribution unavailable: ledger helpers are missing."
   ix_log "DECISION fallback missing ledger helper"
+  ix_log_injection "$_channel" "$_fallback"
   case "$_channel" in
     systemMessage)
       jq -n --arg msg "$_fallback" '{"systemMessage": $msg}'
@@ -79,6 +80,7 @@ if [ "${_edit_count:-0}" -gt 0 ]; then
 fi
 
 ix_log "DECISION emit summary chars=${#_summary}"
+ix_log_injection "$_channel" "$_summary"
 case "$_channel" in
   systemMessage)
     jq -n --arg msg "$_summary" '{"systemMessage": $msg}'
