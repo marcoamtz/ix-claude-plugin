@@ -78,11 +78,27 @@ ix_ledger_append() {
 ix_ledger_last_turn() {
   [ ! -f "$IX_LEDGER_FILE" ] && return 0
 
-  # Read last 200 lines (one turn rarely exceeds a handful of hook events)
-  # and filter to those matching the current turn_id.
   local _tid
   _tid=$(ix_ledger_turn_id "${1:-}")
-  tail -200 "$IX_LEDGER_FILE" 2>/dev/null \
+
+  # Read last 200 lines, filter to this session's records.
+  local _session_records
+  _session_records=$(tail -200 "$IX_LEDGER_FILE" 2>/dev/null \
     | jq -sc --arg tid "$_tid" '[.[] | select(.turn_id == $tid)]' 2>/dev/null \
-    || echo ""
+    || echo "[]")
+
+  # Scope to the current turn: the last Briefing record marks the start of
+  # this turn (UserPromptSubmit always fires before any PreToolUse).
+  # ISO 8601 strings are lexicographically ordered so >= comparison works.
+  local _turn_start
+  _turn_start=$(printf '%s\n' "$_session_records" \
+    | jq -r '[.[] | select(.tool == "Briefing")] | last | .ts // ""' 2>/dev/null || echo "")
+
+  if [ -n "$_turn_start" ]; then
+    printf '%s\n' "$_session_records" \
+      | jq -c --arg start "$_turn_start" '[.[] | select(.ts >= $start)]' 2>/dev/null \
+      || echo ""
+  else
+    printf '%s\n' "$_session_records"
+  fi
 }
