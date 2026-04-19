@@ -321,8 +321,10 @@ else
   _ctx=$(echo "${_OUT}" | jq -r '.additionalContext // empty' 2>/dev/null || true)
   if [[ "${_ctx}" != *"[ix] Session briefing:"* ]]; then
     fail "briefing/default model-authored annotation instruction" "missing session briefing in additionalContext"
-  elif [[ "${_ctx}" != *'exactly titled "Ix" followed by 1-2 short bullet points'* ]]; then
+  elif [[ "${_ctx}" != *'must end your response with exactly this final structure and nothing after it:'* ]]; then
     fail "briefing/default model-authored annotation instruction" "missing model-authored Ix section instruction"
+  elif [[ "${_ctx}" != *'Use 1 or 2 markdown bullets only'* ]]; then
+    fail "briefing/default model-authored annotation instruction" "missing strict Ix bullet-format rule"
   else
     pass "briefing/default model-authored annotation instruction"
   fi

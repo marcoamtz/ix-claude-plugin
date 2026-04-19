@@ -26,7 +26,7 @@ _mode="${IX_ANNOTATE_MODE:-brief}"
 _annotation_instruction=""
 
 if [ "$_mode" != "off" ] && { [ "$_channel" = "modelSuffix" ] || [ "$_channel" = "both" ]; }; then
-  _annotation_instruction='[ix meta] Attribution: if you received any lines starting with [ix] since the last user message, you must end your response with a short final section exactly titled "Ix" followed by 1-2 short bullet points describing how ix was used and what it helped with. Keep it factual and infer only from the [ix] lines you actually saw this turn. Do not mention search, read, edit, or session context unless it actually happened. Do not add an Ix section if you received no [ix] lines this turn. Keep the whole section concise. Example:\nIx\n- surfaced symbol matches before search\n- flagged edit blast radius before modification'
+  _annotation_instruction='[ix meta] Attribution: if you received any lines starting with [ix] since the last user message, you must end your response with exactly this final structure and nothing after it:\nIx\n- <short bullet about how ix was used>\n- <optional second short bullet about what ix helped with>\nRules:\n- Use the heading exactly: Ix\n- Use 1 or 2 markdown bullets only\n- Do not write a prose paragraph\n- Do not put anything after the Ix section\n- Each bullet must be short, factual, and derived only from the [ix] lines you actually saw this turn\n- Do not mention search, read, edit, or session context unless it actually happened\n- Do not add an Ix section if you received no [ix] lines this turn\nExample:\nIx\n- surfaced symbol matches before search\n- flagged edit blast radius before modification'
 fi
 
 _briefing_fresh=0
