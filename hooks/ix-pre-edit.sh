@@ -50,6 +50,7 @@ fi
 
 ix_log "RUN ix impact $REL_PATH"
 _imp_err=$(mktemp)
+ix_log_command ix impact "$REL_PATH" --format json
 RAW=$(ix impact "$REL_PATH" --format json 2>"$_imp_err") || {
   _exit=$?
   ix_capture_async "ix" "ix-impact" "ix impact failed for $REL_PATH" "$_exit" \

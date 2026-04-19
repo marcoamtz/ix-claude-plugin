@@ -74,6 +74,7 @@ ix_check_pro() {
   _health_ts=$(cat "$IX_HEALTH_CACHE" 2>/dev/null || echo "0")
   _pro_ts=$(cat "${IX_PRO_CACHE}.ts" 2>/dev/null || echo "")
   if [ "$_pro_ts" != "$_health_ts" ]; then
+    ix_log_command ix briefing --help
     ix briefing --help >/dev/null 2>&1 && echo "1" > "$IX_PRO_CACHE" || echo "0" > "$IX_PRO_CACHE"
     echo "$_health_ts" > "${IX_PRO_CACHE}.ts"
   fi
@@ -351,6 +352,16 @@ ix_looks_like_secret() {
   # Long high-entropy token (>= 32 chars, mostly base64/hex alphabet)
   local _len="${#_p}"
   if [ "$_len" -ge 32 ]; then
+    # Preserve coverage for opaque lowercase-alpha keys without re-flagging
+    # snake_case or alternation-heavy code search patterns.
+    printf '%s' "$_p" | grep -qE '^[a-z]{32,}$' && return 0
+    local _has_signal=0
+    printf '%s' "$_p" | grep -q '[0-9]' && _has_signal=1
+    if printf '%s' "$_p" | grep -q '[A-Z]' && printf '%s' "$_p" | grep -q '[a-z]'; then
+      _has_signal=1
+    fi
+    printf '%s' "$_p" | grep -q '[+/=]' && _has_signal=1
+    [ "$_has_signal" -eq 0 ] && return 1
     local _alnum
     _alnum=$(printf '%s' "$_p" | tr -cd 'A-Za-z0-9+/=_-' | wc -c | tr -d ' ')
     awk "BEGIN { exit !($_alnum / $_len > 0.90) }" && return 0

@@ -46,6 +46,7 @@ fi
 if [ "$_skip_map" -eq 0 ]; then
   echo "$_now" > "$IX_MAP_DEBOUNCE_FILE"
   ix_log "RUN ix map (full graph refresh)"
+  ix_log_command ix map
   ix map >/dev/null 2>&1 && ix_log "DONE ix map complete" || {
     ix_capture_async "ix" "ix-map" "full map failed" "$?" "ix map" ""
     ix_log "FAILED ix map exit=$?"

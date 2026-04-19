@@ -57,27 +57,23 @@ _records=$(ix_ledger_last_turn "$INPUT")
 [ -n "${_records:-}" ] || { ix_log "SKIP no ledger records"; exit 0; }
 [ "$_records" != "[]" ] || { ix_log "SKIP empty ledger records"; exit 0; }
 
-_grep_count=$(printf '%s\n' "$_records" | jq '[.[] | select(.tool == "Grep" or .tool == "Glob" or .tool == "Bash")] | length' 2>/dev/null || echo 0)
-_read_count=$(printf '%s\n' "$_records" | jq '[.[] | select(.tool == "Read")] | length' 2>/dev/null || echo 0)
-_edit_count=$(printf '%s\n' "$_records" | jq '[.[] | select(.tool == "Edit" or .tool == "Write" or .tool == "MultiEdit")] | length' 2>/dev/null || echo 0)
-_briefing_count=$(printf '%s\n' "$_records" | jq '[.[] | select(.tool == "Briefing")] | length' 2>/dev/null || echo 0)
+_grep_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and (.tool == "Grep" or .tool == "Glob" or .tool == "Bash"))] | length' 2>/dev/null || echo 0)
+_read_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and .tool == "Read")] | length' 2>/dev/null || echo 0)
+_edit_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and (.tool == "Edit" or .tool == "Write" or .tool == "MultiEdit"))] | length' 2>/dev/null || echo 0)
+_briefing_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and .tool == "Briefing")] | length' 2>/dev/null || echo 0)
 
 _summary=""
 if [ "${_grep_count:-0}" -gt 0 ]; then
-  _summary="Ix helped by surfacing a relevant symbol before search."
+  _summary="Ix surfaced a relevant symbol before search."
 elif [ "${_read_count:-0}" -gt 0 ]; then
-  _summary="Ix helped by highlighting relevant file structure before reading."
+  _summary="Ix provided file context before read."
 elif [ "${_edit_count:-0}" -gt 0 ]; then
-  _summary="Ix helped by flagging edit impact before changes were applied."
+  _summary="Ix flagged edit blast radius before modification."
 elif [ "${_briefing_count:-0}" -gt 0 ]; then
-  _summary="Ix helped by refreshing the session context before work began."
+  _summary="Ix injected session context."
 fi
 
 [ -n "$_summary" ] || { ix_log "SKIP no attributable ix activity"; exit 0; }
-
-if [ "${_edit_count:-0}" -gt 0 ]; then
-  _summary="${_summary} Ix also helped by prompting you to note what changed, why, and any follow-ups after ${_edit_count} edit(s)."
-fi
 
 ix_log "DECISION emit summary chars=${#_summary}"
 ix_log_injection "$_channel" "$_summary"

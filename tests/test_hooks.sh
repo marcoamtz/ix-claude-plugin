@@ -46,6 +46,25 @@ run_hook() {
     bash "${_hook}" < "${_input}" 2>/dev/null) || _RC=$?
 }
 
+run_hook_with_debug_log() {
+  local _hook="${HOOKS_DIR}/$1" _input="$2"; shift 2
+  local _run_tmp; _run_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
+  _IX_DEBUG_LOG="${_run_tmp}/ix-hooks.log"
+  _RC=0
+  _OUT=$(env \
+    TMPDIR="${_run_tmp}" \
+    IX_HEALTH_CACHE="${_run_tmp}/ix-healthy" \
+    IX_MAP_DEBOUNCE_FILE="${_run_tmp}/ix-map-last" \
+    IX_MAP_LOCK_PATH="${_run_tmp}/ix-map.lock" \
+    IX_LEDGER_MODE="off" \
+    IX_INGEST_INJECT="off" \
+    IX_ERROR_MODE="off" \
+    IX_DEBUG_LOG="${_IX_DEBUG_LOG}" \
+    "$@" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${_hook}" < "${_input}" 2>/dev/null) || _RC=$?
+}
+
 # ── Assert helpers ────────────────────────────────────────────────────────────
 
 # Assert exit 0 and no stdout.
@@ -165,6 +184,19 @@ assert_no_hook_specific_output() {
   pass "${_name}"
 }
 
+assert_log_contains() {
+  local _name="$1" _needle="$2"
+  if [ ! -f "${_IX_DEBUG_LOG:-}" ]; then
+    fail "${_name}" "debug log missing at ${_IX_DEBUG_LOG:-<unset>}"; return
+  fi
+  if ! grep -Fq -- "$_needle" "${_IX_DEBUG_LOG}"; then
+    local _log
+    _log=$(sed -n '1,40p' "${_IX_DEBUG_LOG}" 2>/dev/null || true)
+    fail "${_name}" "debug log missing '${_needle}' — log: ${_log:0:240}"; return
+  fi
+  pass "${_name}"
+}
+
 run_ix_hook_decide() {
   local _mode="$1" _content="$2"; shift 2
   _RC=0
@@ -193,6 +225,19 @@ run_ix_query_intent() {
   ' _ "${_pattern}" 2>/dev/null) || _RC=$?
 }
 
+run_ix_looks_like_secret() {
+  local _pattern="$1"; shift
+  _RC=0
+  _OUT=$(env "$@" bash -lc '
+    source "'"${HOOKS_DIR}"'/lib/index.sh"
+    if ix_looks_like_secret "$1"; then
+      printf "secret\n"
+    else
+      printf "not_secret\n"
+    fi
+  ' _ "${_pattern}" 2>/dev/null) || _RC=$?
+}
+
 # ── Minimal "no-tool" fixture (causes hooks to exit early with no output) ─────
 _EMPTY_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name": "", "tool_input": {}, "cwd": "/repo"}' > "${_EMPTY_FIXTURE}"
@@ -211,6 +256,22 @@ printf '{"tool_name":"Bash","tool_input":{"command":"grep sk-abc123456789abcdef0
 _BASH_GREP_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
 printf '{"tool_name":"Bash","tool_input":{"command":"grep -r '\''AuthService'\'' src/"},"cwd":"/repo"}' \
   > "${_BASH_GREP_FIXTURE}"
+
+_BASH_RG_ALT_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rg -n \"ix_ledger_last_turn|ix_ledger_append\" hooks"},"cwd":"/repo"}' \
+  > "${_BASH_RG_ALT_FIXTURE}"
+
+_BASH_CD_RG_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cd src && rg AuthService"},"cwd":"/repo"}' \
+  > "${_BASH_CD_RG_FIXTURE}"
+
+_BASH_SUBSHELL_GREP_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"(cd src; grep -r '\''AuthService'\'' .)"},"cwd":"/repo"}' \
+  > "${_BASH_SUBSHELL_GREP_FIXTURE}"
+
+_BASH_PIPELINE_GREP_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"find src -name '\''*.ts'\'' | xargs grep AuthService"},"cwd":"/repo"}' \
+  > "${_BASH_PIPELINE_GREP_FIXTURE}"
 
 # ── Bash non-grep fixture ─────────────────────────────────────────────────────
 _BASH_LS_FIXTURE=$(mktemp -p "${TEST_TMPDIR}" --suffix=.json)
@@ -241,26 +302,35 @@ printf '{"tool_name":"Edit","tool_input":{"file_path":"/repo/README.md","old_str
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-briefing.sh — prompt briefing and model-authored attribution instruction
+#
+# Fires on: UserPromptSubmit
+# Fires by default to inject model-authored ix attribution guidance
+# No-ops: IX_ANNOTATE_MODE=off, empty prompt
+# Manual smoke test: see SMOKE_TESTS.md § ix-briefing.sh
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-briefing.sh"
 
-run_hook ix-briefing.sh "${_USER_PROMPT_FIXTURE}" IX_ANNOTATE_MODE=brief IX_ANNOTATE_CHANNEL=modelSuffix
+run_hook ix-briefing.sh "${_USER_PROMPT_FIXTURE}"
 if [ "${_RC}" -ne 0 ]; then
-  fail "briefing/model-authored annotation instruction" "expected exit 0, got ${_RC}"
+  fail "briefing/default model-authored annotation instruction" "expected exit 0, got ${_RC}"
 elif [ -z "${_OUT}" ]; then
-  fail "briefing/model-authored annotation instruction" "expected JSON output, got nothing"
+  fail "briefing/default model-authored annotation instruction" "expected JSON output, got nothing"
 elif ! echo "${_OUT}" | jq -e '.additionalContext' >/dev/null 2>&1; then
-  fail "briefing/model-authored annotation instruction" "missing additionalContext — output: ${_OUT:0:120}"
+  fail "briefing/default model-authored annotation instruction" "missing additionalContext — output: ${_OUT:0:120}"
 else
   _ctx=$(echo "${_OUT}" | jq -r '.additionalContext // empty' 2>/dev/null || true)
   if [[ "${_ctx}" != *"[ix] Session briefing:"* ]]; then
-    fail "briefing/model-authored annotation instruction" "missing session briefing in additionalContext"
-  elif [[ "${_ctx}" != *'Use one terse sentence by default; use two short sentences only if one sentence would be awkward.'* ]]; then
-    fail "briefing/model-authored annotation instruction" "missing model-authored Ix instruction"
+    fail "briefing/default model-authored annotation instruction" "missing session briefing in additionalContext"
+  elif [[ "${_ctx}" != *'exactly titled "Ix" followed by 1-2 short bullet points'* ]]; then
+    fail "briefing/default model-authored annotation instruction" "missing model-authored Ix section instruction"
   else
-    pass "briefing/model-authored annotation instruction"
+    pass "briefing/default model-authored annotation instruction"
   fi
 fi
+
+run_hook_with_debug_log ix-briefing.sh "${_USER_PROMPT_FIXTURE}"
+assert_log_contains "briefing/debug logs pro probe command" "CMD ix briefing --help"
+assert_log_contains "briefing/debug logs briefing command" "CMD ix briefing --format json"
 
 _briefing_repeat_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
 _RC=0
@@ -295,6 +365,21 @@ assert_additional_context "briefing/model-authored annotation persists on fresh 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-intercept.sh — Grep and Glob
+#
+# Fires on: PreToolUse(Grep), PreToolUse(Glob)
+#
+# Grep — fires when: pattern is a symbol name (CamelCase, dotted, identifier)
+#   Correct input:  {"pattern":"AuthService","path":"src/"}  → block or augment
+#   No-op inputs:   "TODO", "timeout exceeded", regex like \w+\.ts$ → literal intent
+#   Expected stderr (block): ix locate 'AuthService' → AuthService at src/auth.ts [BLOCKED]
+#   Expected stderr (augment): ix text + ix locate: 'AuthService' → ...
+#
+# Glob — fires when: pattern has path structure (e.g. hooks/**/*.sh)
+#   Correct input:  {"pattern":"hooks/**/*.sh","path":"/repo"} → block or augment
+#   No-op inputs:   bare extension glob "*.ts" → literal glob pattern
+#   Expected stderr (block): ix inventory: 'hooks/**/*.sh' in /repo → N entities [BLOCKED]
+#
+# Manual smoke test: see SMOKE_TESTS.md § ix-intercept.sh
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-intercept.sh"
 
@@ -371,6 +456,69 @@ else
   pass "lib/ix_query_intent regex literal"
 fi
 
+run_ix_looks_like_secret "sk-abc123456789abcdef012345678901234567890"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret known prefix" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret known prefix" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret known prefix"
+fi
+
+run_ix_looks_like_secret "ghp_abcdefghijklmnop1234567890abcdef"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret github prefix" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret github prefix" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret github prefix"
+fi
+
+run_ix_looks_like_secret "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret jwt prefix" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret jwt prefix" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret jwt prefix"
+fi
+
+run_ix_looks_like_secret "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret sha1-ish token" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret sha1-ish token" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret sha1-ish token"
+fi
+
+run_ix_looks_like_secret "550e8400-e29b-41d4-a716-446655440000"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret uuid-like token" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret uuid-like token" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret uuid-like token"
+fi
+
+run_ix_looks_like_secret "abcdefghijklmnopqrstuvwxyzabcdefgh"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret lowercase alpha token" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "secret" ]; then
+  fail "lib/ix_looks_like_secret lowercase alpha token" "expected secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret lowercase alpha token"
+fi
+
+run_ix_looks_like_secret "ix_ledger_last_turn|ix_ledger_append"
+if [ "${_RC}" -ne 0 ]; then
+  fail "lib/ix_looks_like_secret snake-case alternation" "expected exit 0, got ${_RC}"
+elif [ "${_OUT}" != "not_secret" ]; then
+  fail "lib/ix_looks_like_secret snake-case alternation" "expected not_secret, got: ${_OUT}"
+else
+  pass "lib/ix_looks_like_secret snake-case alternation"
+fi
+
 # Plain symbol → high-confidence exact match → block
 run_hook ix-intercept.sh "${FX_IN}/grep_plain.json"
 assert_block_decision "intercept/grep plain symbol blocks" "Next: ix read AuthService | ix explain AuthService"
@@ -440,7 +588,14 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ix-read.sh
+# ix-read.sh — DISABLED (not registered in hooks/hooks.json)
+#
+# This hook is a placeholder. It is NOT in the active hook registry and will
+# never fire in production. These tests exercise the script logic directly
+# to catch regressions if the hook is re-enabled in the future.
+#
+# No-ops: binary file extensions (.bin, .png, etc.)
+# Manual smoke test: n/a — hook is disabled
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-read.sh"
 
@@ -472,12 +627,31 @@ assert_structured "read/structured output mode"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-pre-edit.sh — Edit and Write
+#
+# Fires on: PreToolUse(Edit), PreToolUse(Write), PreToolUse(MultiEdit)
+# Fires when: target file is a code file AND riskLevel is medium/high/critical
+#             AND effective dependents >= 3
+#
+# Correct input:  edit_high_risk.json (code file, high-risk fixture)
+# No-op inputs:
+#   - *.md, *.txt, *.lock, *.png, etc. → extension filter
+#   - riskLevel=low → below warning threshold
+#   - effective dependents < 3 → below noise threshold
+#   - file not in graph (riskLevel=unknown) → skipped
+#
+# Expected stdout (when fires): JSON additionalContext starting with
+#   "[ix] ⚠️  HIGH-RISK EDIT" or "[ix] ⚠️  CRITICAL EDIT" or "[ix] NOTE"
+#
+# Manual smoke test: see SMOKE_TESTS.md § ix-pre-edit.sh
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-pre-edit.sh"
 
 # High-risk edit → warning injected
 run_hook ix-pre-edit.sh "${FX_IN}/edit_high_risk.json"
 assert_additional_context "pre-edit/high-risk edit warns"
+
+run_hook_with_debug_log ix-pre-edit.sh "${FX_IN}/edit_high_risk.json"
+assert_log_contains "pre-edit/debug logs impact command" "CMD ix impact src/auth.ts --format json"
 
 # Low-risk edit → riskLevel=low → no output
 run_hook ix-pre-edit.sh "${FX_IN}/edit_low_risk.json" \
@@ -502,12 +676,45 @@ assert_structured "pre-edit/structured output mode"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-bash.sh — Bash grep intercept
+#
+# Fires on: PreToolUse(Bash)
+# Fires when: command contains grep or rg with an extractable pattern
+#
+# Correct inputs (all four command forms fire the hook):
+#   - Direct:    grep -r 'AuthService' src/
+#   - cd&&rg:    cd src && rg AuthService
+#   - Subshell:  (cd src; grep -r 'AuthService' .)
+#   - Pipeline:  find src -name '*.ts' | xargs grep AuthService
+#
+# No-op inputs:
+#   - Non-grep commands (ls, cat, git, etc.) → not a search command
+#   - Patterns that look like secrets/tokens → IX_SKIP_SECRET_PATTERNS guard
+#   - Pattern too short (< 3 chars)
+#
+# Visible output: stdout JSON with additionalContext (no stderr line emitted)
+# Manual smoke test: see SMOKE_TESTS.md § ix-bash.sh
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-bash.sh"
 
 # bash grep command → text + locate → additionalContext
 run_hook ix-bash.sh "${_BASH_GREP_FIXTURE}"
 assert_additional_context "bash/grep intercepted"
+
+# long snake_case alternation in rg should not be suppressed as a secret/token
+run_hook ix-bash.sh "${_BASH_RG_ALT_FIXTURE}"
+assert_additional_context "bash/rg alternation intercepted" "ix_ledger_last_turn|ix_ledger_append"
+
+# wrapped cd && rg command should still be intercepted
+run_hook ix-bash.sh "${_BASH_CD_RG_FIXTURE}"
+assert_additional_context "bash/cd and rg intercepted" "AuthService"
+
+# subshell-wrapped grep command should still be intercepted
+run_hook ix-bash.sh "${_BASH_SUBSHELL_GREP_FIXTURE}"
+assert_additional_context "bash/subshell grep intercepted" "AuthService"
+
+# pipeline-prefixed xargs grep should still be intercepted
+run_hook ix-bash.sh "${_BASH_PIPELINE_GREP_FIXTURE}"
+assert_additional_context "bash/pipeline grep intercepted" "AuthService"
 
 # Non-grep command (ls) → not intercepted → no output
 run_hook ix-bash.sh "${_BASH_LS_FIXTURE}"
@@ -531,6 +738,22 @@ assert_structured "bash/structured output mode"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix-annotate.sh — Stop hook attribution
+#
+# Fires on: Stop (synchronous, before ix-map.sh)
+# Fires when: IX_ANNOTATE_MODE=brief AND at least one ledger entry with
+#             ctx_chars > 0 exists for this session
+#
+# No-ops:
+#   - IX_ANNOTATE_MODE=off (default) → silent
+#   - IX_ANNOTATE_CHANNEL=modelSuffix → silent (model writes its own line)
+#   - No ledger entries with ctx_chars > 0 → nothing to report
+#
+# Expected systemMessage strings by hook type:
+#   Grep/Glob intercepted → "Ix surfaced a relevant symbol before search."
+#   Edit intercepted      → "Ix flagged edit blast radius before modification."
+#   Briefing fired        → "Ix injected session context."
+#
+# Manual smoke test: see SMOKE_TESTS.md § ix-annotate.sh
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix-annotate.sh"
 
@@ -565,7 +788,7 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/stop hook emits ix summary" "Ix helped by surfacing a relevant symbol before search."
+  assert_system_message "annotate/stop hook emits ix summary" "Ix surfaced a relevant symbol before search."
   assert_no_hook_specific_output "annotate/stop hook uses top-level output contract"
 
   _RC=0
@@ -579,6 +802,18 @@ else
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
   assert_empty "annotate/modelSuffix mode stays silent"
+
+  _RC=0
+  _OUT=$(env \
+    HOME="${_annotate_home}" \
+    TMPDIR="${_annotate_tmp}" \
+    IX_ANNOTATE_MODE="off" \
+    IX_ANNOTATE_CHANNEL="systemMessage" \
+    IX_LEDGER_MODE="on" \
+    IX_ERROR_MODE="off" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+  assert_empty "annotate/off mode stays silent"
 fi
 
 _annotate_missing_ledger_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
@@ -632,11 +867,42 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/post-decision nudge after edits" "prompting you to note what changed, why, and any follow-ups after 1 edit(s)."
+  assert_system_message "annotate/edit attribution summary" "Ix flagged edit blast radius before modification."
 fi
+
+_annotate_zero_ctx_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
+_annotate_zero_ctx_home="${_annotate_zero_ctx_tmp}/home"
+mkdir -p "${_annotate_zero_ctx_home}"
+
+env \
+  HOME="${_annotate_zero_ctx_home}" \
+  TMPDIR="${_annotate_zero_ctx_tmp}" \
+  IX_LEDGER_MODE="on" \
+  IX_ERROR_MODE="off" \
+  bash -lc '
+    source "'"${HOOKS_DIR}"'/ix-ledger.sh"
+    INPUT='"'"'{"session_id":"test-session-001"}'"'"'
+    ix_ledger_append "PreToolUse" "Grep" "0" "text,locate" "1" "" "5"
+  ' >/dev/null 2>/dev/null
+
+_RC=0
+_OUT=$(env \
+  HOME="${_annotate_zero_ctx_home}" \
+  TMPDIR="${_annotate_zero_ctx_tmp}" \
+  IX_ANNOTATE_MODE="brief" \
+  IX_ANNOTATE_CHANNEL="systemMessage" \
+  IX_LEDGER_MODE="on" \
+  IX_ERROR_MODE="off" \
+  PATH="${TESTS_DIR}:${PATH}" \
+  bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+assert_empty "annotate/zero-ctx records stay silent"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ix not in PATH — one-time systemMessage notification
+#
+# Fires on: any hook that calls ix_health_check when ix is not in PATH
+# Fires when: first hook fire in a session with no ix binary
+# No-ops: subsequent fires in the same session (sentinel file prevents repeat)
 # ═════════════════════════════════════════════════════════════════════════════
 section "ix unavailable notification"
 

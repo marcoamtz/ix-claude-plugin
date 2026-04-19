@@ -22,11 +22,11 @@ source "${_HOOK_DIR}/lib/index.sh"
 IX_BRIEFING_CACHE="${TMPDIR:-/tmp}/ix-briefing-cache"
 _now=$(date +%s)
 _channel="${IX_ANNOTATE_CHANNEL:-modelSuffix}"
-_mode="${IX_ANNOTATE_MODE:-off}"
+_mode="${IX_ANNOTATE_MODE:-brief}"
 _annotation_instruction=""
 
 if [ "$_mode" != "off" ] && { [ "$_channel" = "modelSuffix" ] || [ "$_channel" = "both" ]; }; then
-  _annotation_instruction='[ix meta] Attribution: if you received any lines starting with [ix] since the last user message, you must end your response with exactly one short final line starting with "Ix:". Use one terse sentence by default; use two short sentences only if one sentence would be awkward. Keep it factual and infer only from the [ix] lines you actually saw this turn. Do not mention search, read, edit, or session context unless it actually happened. Do not add an Ix line if you received no [ix] lines this turn. Prefer 8-18 words and never exceed 25 words. Example: Ix: surfaced symbol matches before search and checked file context before read.'
+  _annotation_instruction='[ix meta] Attribution: if you received any lines starting with [ix] since the last user message, you must end your response with a short final section exactly titled "Ix" followed by 1-2 short bullet points describing how ix was used and what it helped with. Keep it factual and infer only from the [ix] lines you actually saw this turn. Do not mention search, read, edit, or session context unless it actually happened. Do not add an Ix section if you received no [ix] lines this turn. Keep the whole section concise. Example:\nIx\n- surfaced symbol matches before search\n- flagged edit blast radius before modification'
 fi
 
 _briefing_fresh=0

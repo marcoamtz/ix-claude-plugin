@@ -26,8 +26,10 @@ ix_log "ENTRY file=$FILE_PATH inject=$IX_INGEST_INJECT"
 # ── Map file (retry once on failure) ─────────────────────────────────────────
 ix_log "RUN ix map $FILE_PATH"
 _map_err=$(mktemp)
+ix_log_command ix map "$FILE_PATH"
 ix map "$FILE_PATH" >/dev/null 2>"$_map_err" || {
   ix_log "RETRY ix map failed once, retrying"
+  ix_log_command ix map "$FILE_PATH"
   ix map "$FILE_PATH" >/dev/null 2>"$_map_err" || {
     _exit=$?
     ix_capture_async "ix" "ix-map" "ix map failed" "$_exit" \
