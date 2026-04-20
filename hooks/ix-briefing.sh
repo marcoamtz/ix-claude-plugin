@@ -73,7 +73,7 @@ _context=""
 if [ -n "$BRIEFING" ]; then
   _context="[ix] Session briefing:\n${BRIEFING}"
   ix_ledger_append "UserPromptSubmit" "Briefing" "${#_context}" "briefing" "1" "" "$_elapsed_ms" \
-    "loaded session briefing before work began."
+    "loaded project context up front from goals, plans, and recent decisions."
 fi
 [ -n "$_annotation_instruction" ] && {
   if [ -n "$_context" ]; then

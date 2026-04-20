@@ -163,12 +163,12 @@ if [ "$TOOL" = "Grep" ]; then
     [ -n "$TEXT_PART" ] && REASON="${REASON}"$'\n'"${TEXT_PART}"
     REASON="${REASON}"$'\n'"Next: ix read ${_loc_name} | ix explain ${_loc_name}"
     ix_ledger_append "PreToolUse" "Grep" "${#REASON}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms" \
-      "located ${_loc_name:-$PATTERN} before Grep search."
+      "surfaced a graph-backed match for ${_loc_name:-$PATTERN} and pointed to the right follow-up path."
     echo "ix locate '${PATTERN}' → ${_loc_name} at ${_loc_path} [BLOCKED]" >&2
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   elif [ "$HOOK_MODE" = "augment" ]; then
     ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms" \
-      "searched graph for ${PATTERN} before Grep search."
+      "surfaced graph-backed matches for ${PATTERN} and suggested deeper ix follow-ups."
     ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix text + ix locate: '${PATTERN}' → ${LOC_PART:-no exact match} | ${TEXT_PART:-no text hits}" >&2
     ix_hook_fallback "augment" "$CONTEXT"
@@ -181,12 +181,12 @@ else
     REASON="[ix inventory] '${PATTERN}' in ${PATH_ARG}: ${TOTAL} entities — ${SAMPLE}"
     [ -n "$_first_sample" ] && REASON="${REASON} | Next: ix overview ${_first_sample}"
     ix_ledger_append "PreToolUse" "Glob" "${#REASON}" "inventory" "1" "" "$_elapsed_ms" \
-      "surveyed ${PATTERN} with inventory before Glob."
+      "surveyed ${PATTERN} with inventory and highlighted likely targets."
     echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities [BLOCKED]" >&2
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   else
     ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms" \
-      "surveyed ${PATTERN} with inventory before Glob."
+      "surveyed ${PATTERN} with inventory and highlighted likely targets."
     ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities" >&2
     ix_hook_fallback "augment" "$CONTEXT"

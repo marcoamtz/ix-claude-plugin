@@ -81,7 +81,12 @@ ix_log "IMPACT risk=$RISK_LEVEL deps=$EFFECTIVE_DEPS file=$REL_PATH"
 
 # ── Only warn when impact is meaningful ──────────────────────────────────────
 [ "$RISK_LEVEL" = "unknown" ] && { ix_log "SKIP risk=unknown (not in graph)"; exit 0; }
-[ "$RISK_LEVEL" = "low" ] && { ix_log "SKIP risk=low (no warning needed)"; exit 0; }
+[ "$RISK_LEVEL" = "low" ] && {
+  ix_ledger_append "PreToolUse" "Edit" "1" "impact" "1" "${RISK_LEVEL:-}" "0" \
+    "checked impact for ${FILENAME} and confirmed it was low risk with no broad blast radius."
+  ix_log "SKIP risk=low (no warning needed)"
+  exit 0
+}
 # Require at least 3 effective dependents to avoid noise on leaf files
 [ "${EFFECTIVE_DEPS:-0}" -lt 3 ] 2>/dev/null && { ix_log "SKIP deps=$EFFECTIVE_DEPS < 3 threshold"; exit 0; }
 
@@ -100,7 +105,7 @@ WARNING="${PREFIX} — ${FILENAME} has ${EFFECTIVE_DEPS} dependents. ${RISK_SUMM
 _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
 ix_log "DECISION warn risk=$RISK_LEVEL deps=$EFFECTIVE_DEPS (${_elapsed_ms}ms)"
 ix_ledger_append "PreToolUse" "Edit" "${#WARNING}" "impact" "1" "${RISK_LEVEL:-}" "$_elapsed_ms" \
-  "checked impact for ${FILENAME} (${RISK_LEVEL} risk, ${EFFECTIVE_DEPS} dependents)."
+  "checked impact for ${FILENAME} and flagged ${RISK_LEVEL} risk across ${EFFECTIVE_DEPS} dependents."
 
 if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
   jq -n --arg ctx "$WARNING" '{

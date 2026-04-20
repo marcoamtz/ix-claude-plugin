@@ -72,7 +72,14 @@ _note_parts=$(printf '%s\n' "$_records" | jq -r '
   | .[:3]
   | .[]' 2>/dev/null || echo "")
 
-_summary=$(printf '%s\n' "${_note_parts}" | awk 'NF { parts[++n]=$0 } END { for (i=1; i<=n; i++) printf "Ix %s%s", parts[i], (i<n ? " " : "") }')
+_summary=$(printf '%s\n' "${_note_parts}" | awk '
+  NF { parts[++n]=$0 }
+  END {
+    if (n > 0) {
+      printf "Ix %s", parts[1]
+      for (i=2; i<=n; i++) printf " It also %s", parts[i]
+    }
+  }')
 
 if [ -z "$_summary" ]; then
   if [ "${_grep_count:-0}" -gt 0 ]; then

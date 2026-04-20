@@ -76,7 +76,7 @@ _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
 ix_log "DECISION augment ${#CONTEXT} chars (${_elapsed_ms}ms)"
 ix_log_injection "additionalContext" "$CONTEXT"
 ix_ledger_append "PreToolUse" "Bash" "${#CONTEXT}" "text,locate" "1" "" "$_elapsed_ms" \
-  "searched graph for ${PATTERN} before Bash grep."
+  "turned shell grep for ${PATTERN} into a graph-aware search with ranked matches."
 
 if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
   jq -n --arg ctx "$CONTEXT" '{

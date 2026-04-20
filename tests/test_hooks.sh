@@ -751,11 +751,11 @@ assert_structured "bash/structured output mode"
 #   - No ledger entries with ctx_chars > 0 → nothing to report
 #
 # Expected summary content by hook type:
-#   Grep intercepted      → "Ix located AuthService before Grep search."
-#   Bash intercepted      → "Ix searched graph for ..."
-#   Glob intercepted      → "Ix surveyed hooks/**/*.sh with inventory before Glob."
-#   Edit intercepted      → "Ix checked impact for auth.ts (high risk, ... dependents)."
-#   Briefing fired        → "Ix loaded session briefing before work began."
+#   Grep intercepted      → "Ix surfaced a graph-backed match ..."
+#   Bash intercepted      → "Ix turned shell grep ... into a graph-aware search ..."
+#   Glob intercepted      → "Ix surveyed ... with inventory and highlighted likely targets."
+#   Edit intercepted      → "Ix checked impact ... and flagged high risk ..."
+#   Briefing fired        → "Ix loaded project context up front ..."
 #
 # Manual smoke test: see SMOKE_TESTS.md § ix-annotate.sh
 # ═════════════════════════════════════════════════════════════════════════════
@@ -790,8 +790,8 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/default emits visible ix summary" "Ix located AuthService before Grep search."
-  assert_additional_context "annotate/default also injects ix summary context" "Ix located AuthService before Grep search."
+  assert_system_message "annotate/default emits visible ix summary" "Ix surfaced a graph-backed match for AuthService"
+  assert_additional_context "annotate/default also injects ix summary context" "Ix surfaced a graph-backed match for AuthService"
 
   _RC=0
   _OUT=$(env \
@@ -803,7 +803,7 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/stop hook emits ix summary" "Ix located AuthService before Grep search."
+  assert_system_message "annotate/stop hook emits ix summary" "Ix surfaced a graph-backed match for AuthService"
   assert_no_hook_specific_output "annotate/stop hook uses top-level output contract"
 
   _RC=0
@@ -882,7 +882,39 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/edit attribution summary" "Ix checked impact for auth.ts (high risk,"
+  assert_system_message "annotate/edit attribution summary" "Ix checked impact for auth.ts and flagged high risk"
+fi
+
+_annotate_low_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
+_annotate_low_home="${_annotate_low_tmp}/home"
+mkdir -p "${_annotate_low_home}"
+
+_seed_low_rc=0
+_OUT=$(env \
+  HOME="${_annotate_low_home}" \
+  TMPDIR="${_annotate_low_tmp}" \
+  IX_HEALTH_CACHE="${_annotate_low_tmp}/ix-healthy" \
+  IX_MAP_LOCK_PATH="${_annotate_low_tmp}/ix-map.lock" \
+  IX_LEDGER_MODE="on" \
+  IX_ERROR_MODE="off" \
+  IX_MOCK_IMPACT_FILE="${FX_IX}/impact_low.json" \
+  PATH="${TESTS_DIR}:${PATH}" \
+  bash "${HOOKS_DIR}/ix-pre-edit.sh" < "${FX_IN}/edit_high_risk.json" >/dev/null 2>/dev/null) || _seed_low_rc=$?
+
+if [ "${_seed_low_rc}" -ne 0 ]; then
+  fail "annotate/seed low-risk edit ledger" "expected low-risk pre-edit hook to succeed, got ${_seed_low_rc}"
+else
+  _RC=0
+  _OUT=$(env \
+    HOME="${_annotate_low_home}" \
+    TMPDIR="${_annotate_low_tmp}" \
+    IX_ANNOTATE_MODE="brief" \
+    IX_ANNOTATE_CHANNEL="systemMessage" \
+    IX_LEDGER_MODE="on" \
+    IX_ERROR_MODE="off" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+  assert_system_message "annotate/low-risk edit attribution summary" "confirmed it was low risk"
 fi
 
 _annotate_zero_ctx_tmp=$(mktemp -d -p "${TEST_TMPDIR}")
