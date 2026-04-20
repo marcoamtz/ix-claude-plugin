@@ -2,8 +2,8 @@
 > For the canonical Ix operating model (command taxonomy, routing, fallback behavior),
 > see `skills/shared.md`. This file covers contributing to ix-claude-plugin specifically.
 
-This repo contains the Claude Code plugin for Ix Memory: shipped skills, hook
-scripts, tests, and marketplace metadata.
+This repo is the Claude Code plugin for [Ix Memory](https://github.com/ix-infrastructure/Ix). When working in this repo, use `ix` commands to navigate it just like any other codebase.
+This repo contains shipped skills, hook scripts, tests, and marketplace metadata.
 
 ## Cognitive Model
 Claude + Ix operates as a three-layer system:
