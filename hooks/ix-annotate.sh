@@ -62,15 +62,28 @@ _read_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 
 _edit_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and (.tool == "Edit" or .tool == "Write" or .tool == "MultiEdit"))] | length' 2>/dev/null || echo 0)
 _briefing_count=$(printf '%s\n' "$_records" | jq '[.[] | select((.ctx_chars // 0) > 0 and .tool == "Briefing")] | length' 2>/dev/null || echo 0)
 
-_summary=""
-if [ "${_grep_count:-0}" -gt 0 ]; then
-  _summary="Ix surfaced a relevant symbol before search."
-elif [ "${_read_count:-0}" -gt 0 ]; then
-  _summary="Ix provided file context before read."
-elif [ "${_edit_count:-0}" -gt 0 ]; then
-  _summary="Ix flagged edit blast radius before modification."
-elif [ "${_briefing_count:-0}" -gt 0 ]; then
-  _summary="Ix injected session context."
+_note_parts=$(printf '%s\n' "$_records" | jq -r '
+  [ .[]
+    | select((.ctx_chars // 0) > 0)
+    | .note
+    | select(type == "string" and length > 0)
+  ]
+  | unique
+  | .[:3]
+  | .[]' 2>/dev/null || echo "")
+
+_summary=$(printf '%s\n' "${_note_parts}" | awk 'NF { parts[++n]=$0 } END { for (i=1; i<=n; i++) printf "Ix %s%s", parts[i], (i<n ? " " : "") }')
+
+if [ -z "$_summary" ]; then
+  if [ "${_grep_count:-0}" -gt 0 ]; then
+    _summary="Ix surfaced a relevant symbol before search."
+  elif [ "${_read_count:-0}" -gt 0 ]; then
+    _summary="Ix provided file context before read."
+  elif [ "${_edit_count:-0}" -gt 0 ]; then
+    _summary="Ix flagged edit blast radius before modification."
+  elif [ "${_briefing_count:-0}" -gt 0 ]; then
+    _summary="Ix injected session context."
+  fi
 fi
 
 [ -n "$_summary" ] || { ix_log "SKIP no attributable ix activity"; exit 0; }

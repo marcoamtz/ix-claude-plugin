@@ -72,7 +72,8 @@ _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
 _context=""
 if [ -n "$BRIEFING" ]; then
   _context="[ix] Session briefing:\n${BRIEFING}"
-  ix_ledger_append "UserPromptSubmit" "Briefing" "${#_context}" "briefing" "1" "" "$_elapsed_ms"
+  ix_ledger_append "UserPromptSubmit" "Briefing" "${#_context}" "briefing" "1" "" "$_elapsed_ms" \
+    "loaded session briefing before work began."
 fi
 [ -n "$_annotation_instruction" ] && {
   if [ -n "$_context" ]; then

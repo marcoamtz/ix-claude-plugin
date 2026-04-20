@@ -162,11 +162,13 @@ if [ "$TOOL" = "Grep" ]; then
     REASON="${REASON}"$'\n'"Found: ${_loc_name} (${_loc_type:-unknown}) at ${_loc_path}"
     [ -n "$TEXT_PART" ] && REASON="${REASON}"$'\n'"${TEXT_PART}"
     REASON="${REASON}"$'\n'"Next: ix read ${_loc_name} | ix explain ${_loc_name}"
-    ix_ledger_append "PreToolUse" "Grep" "${#REASON}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+    ix_ledger_append "PreToolUse" "Grep" "${#REASON}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms" \
+      "located ${_loc_name:-$PATTERN} before Grep search."
     echo "ix locate '${PATTERN}' → ${_loc_name} at ${_loc_path} [BLOCKED]" >&2
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   elif [ "$HOOK_MODE" = "augment" ]; then
-    ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms"
+    ix_ledger_append "PreToolUse" "Grep" "${#CONTEXT}" "text,locate" "${_confidence:-1}" "" "$_elapsed_ms" \
+      "searched graph for ${PATTERN} before Grep search."
     ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix text + ix locate: '${PATTERN}' → ${LOC_PART:-no exact match} | ${TEXT_PART:-no text hits}" >&2
     ix_hook_fallback "augment" "$CONTEXT"
@@ -178,11 +180,13 @@ else
     _first_sample=$(printf '%s' "$SAMPLE" | cut -d',' -f1 | tr -d ' ')
     REASON="[ix inventory] '${PATTERN}' in ${PATH_ARG}: ${TOTAL} entities — ${SAMPLE}"
     [ -n "$_first_sample" ] && REASON="${REASON} | Next: ix overview ${_first_sample}"
-    ix_ledger_append "PreToolUse" "Glob" "${#REASON}" "inventory" "1" "" "$_elapsed_ms"
+    ix_ledger_append "PreToolUse" "Glob" "${#REASON}" "inventory" "1" "" "$_elapsed_ms" \
+      "surveyed ${PATTERN} with inventory before Glob."
     echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities [BLOCKED]" >&2
     ix_hook_fallback "block" "$REASON" "$CONTEXT"
   else
-    ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms"
+    ix_ledger_append "PreToolUse" "Glob" "${#CONTEXT}" "inventory" "1" "" "$_elapsed_ms" \
+      "surveyed ${PATTERN} with inventory before Glob."
     ix_log_injection "additionalContext" "$CONTEXT"
     echo "ix inventory: '${PATTERN}' in ${PATH_ARG} → ${TOTAL} entities" >&2
     ix_hook_fallback "augment" "$CONTEXT"

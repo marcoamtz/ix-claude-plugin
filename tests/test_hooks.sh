@@ -746,14 +746,16 @@ assert_structured "bash/structured output mode"
 #             ctx_chars > 0 exists for this session
 #
 # No-ops:
-#   - IX_ANNOTATE_MODE=off (default) → silent
+#   - IX_ANNOTATE_MODE=off → silent
 #   - IX_ANNOTATE_CHANNEL=modelSuffix → silent (model writes its own line)
 #   - No ledger entries with ctx_chars > 0 → nothing to report
 #
-# Expected systemMessage strings by hook type:
-#   Grep/Glob intercepted → "Ix surfaced a relevant symbol before search."
-#   Edit intercepted      → "Ix flagged edit blast radius before modification."
-#   Briefing fired        → "Ix injected session context."
+# Expected summary content by hook type:
+#   Grep intercepted      → "Ix located AuthService before Grep search."
+#   Bash intercepted      → "Ix searched graph for ..."
+#   Glob intercepted      → "Ix surveyed hooks/**/*.sh with inventory before Glob."
+#   Edit intercepted      → "Ix checked impact for auth.ts (high risk, ... dependents)."
+#   Briefing fired        → "Ix loaded session briefing before work began."
 #
 # Manual smoke test: see SMOKE_TESTS.md § ix-annotate.sh
 # ═════════════════════════════════════════════════════════════════════════════
@@ -784,13 +786,24 @@ else
   _OUT=$(env \
     HOME="${_annotate_home}" \
     TMPDIR="${_annotate_tmp}" \
+    IX_LEDGER_MODE="on" \
+    IX_ERROR_MODE="off" \
+    PATH="${TESTS_DIR}:${PATH}" \
+    bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
+  assert_system_message "annotate/default emits visible ix summary" "Ix located AuthService before Grep search."
+  assert_additional_context "annotate/default also injects ix summary context" "Ix located AuthService before Grep search."
+
+  _RC=0
+  _OUT=$(env \
+    HOME="${_annotate_home}" \
+    TMPDIR="${_annotate_tmp}" \
     IX_ANNOTATE_MODE="brief" \
     IX_ANNOTATE_CHANNEL="systemMessage" \
     IX_LEDGER_MODE="on" \
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/stop hook emits ix summary" "Ix surfaced a relevant symbol before search."
+  assert_system_message "annotate/stop hook emits ix summary" "Ix located AuthService before Grep search."
   assert_no_hook_specific_output "annotate/stop hook uses top-level output contract"
 
   _RC=0
@@ -869,7 +882,7 @@ else
     IX_ERROR_MODE="off" \
     PATH="${TESTS_DIR}:${PATH}" \
     bash "${HOOKS_DIR}/ix-annotate.sh" < "${_STOP_FIXTURE}" 2>/dev/null) || _RC=$?
-  assert_system_message "annotate/edit attribution summary" "Ix flagged edit blast radius before modification."
+  assert_system_message "annotate/edit attribution summary" "Ix checked impact for auth.ts (high risk,"
 fi
 
 _annotate_zero_ctx_tmp=$(mktemp -d -p "${TEST_TMPDIR}")

@@ -36,7 +36,7 @@ ix_ledger_turn_id() {
 }
 
 # ── Public: append one record to the ledger ───────────────────────────────────
-# Usage: ix_ledger_append <hook_event> <tool> <ctx_chars> <ix_cmds> <conf> <risk> <ms>
+# Usage: ix_ledger_append <hook_event> <tool> <ctx_chars> <ix_cmds> <conf> <risk> <ms> [note]
 #   hook_event : PreToolUse | PostToolUse | UserPromptSubmit | Stop
 #   tool       : Grep | Glob | Read | Edit | Write | Bash | Briefing | …
 #   ctx_chars  : length of injected context string (integer)
@@ -44,11 +44,13 @@ ix_ledger_turn_id() {
 #   conf       : confidence value (float string, e.g. "0.85"), or "" / "1"
 #   risk       : risk level from ix impact (high | medium | low | critical | "")
 #   ms         : elapsed milliseconds (integer), or "0" if unavailable
+#   note       : short natural-language note describing how ix helped this turn
 ix_ledger_append() {
   [ "${IX_LEDGER_MODE:-on}" = "off" ] && return 0
 
   local _event="${1:-}"  _tool="${2:-}"  _chars="${3:-0}" \
-        _cmds="${4:-}"   _conf="${5:-1}" _risk="${6:-}"   _ms="${7:-0}"
+        _cmds="${4:-}"   _conf="${5:-1}" _risk="${6:-}"   _ms="${7:-0}" \
+        _note="${8:-}"
   local _turn_id
   [ -z "$_event" ] && return 0
   _turn_id=$(ix_ledger_turn_id)
@@ -65,10 +67,11 @@ ix_ledger_append() {
     --arg  cmds     "$_cmds"        \
     --arg  conf     "$_conf"        \
     --arg  risk     "$_risk"        \
+    --arg  note     "$_note"        \
     --argjson ms    "${_ms:-0}"     \
     '{ts:$ts, turn_id:$turn_id, hook_event:$event, tool:$tool,
       ctx_chars:$chars, ix_cmds:($cmds|split(",")|map(select(length>0))),
-      conf:$conf, risk:$risk, ms:$ms}' \
+      conf:$conf, risk:$risk, note:$note, ms:$ms}' \
     >> "$IX_LEDGER_FILE" 2>/dev/null || true
 }
 

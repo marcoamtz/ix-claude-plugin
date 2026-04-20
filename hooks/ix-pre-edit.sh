@@ -99,7 +99,8 @@ WARNING="${PREFIX} — ${FILENAME} has ${EFFECTIVE_DEPS} dependents. ${RISK_SUMM
 
 _elapsed_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t0 ))
 ix_log "DECISION warn risk=$RISK_LEVEL deps=$EFFECTIVE_DEPS (${_elapsed_ms}ms)"
-ix_ledger_append "PreToolUse" "Edit" "${#WARNING}" "impact" "1" "${RISK_LEVEL:-}" "$_elapsed_ms"
+ix_ledger_append "PreToolUse" "Edit" "${#WARNING}" "impact" "1" "${RISK_LEVEL:-}" "$_elapsed_ms" \
+  "checked impact for ${FILENAME} (${RISK_LEVEL} risk, ${EFFECTIVE_DEPS} dependents)."
 
 if [ "${IX_HOOK_OUTPUT_STYLE:-legacy}" = "structured" ]; then
   jq -n --arg ctx "$WARNING" '{
